@@ -1,7 +1,7 @@
 {
-  "name": "tauri-app",
-  "version": "0.1.0",
-  "description": "",
+  "name": "markdown-reader",
+  "version": "0.1.1",
+  "description": "Markdown Reader Desktop Edition",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "version": "node -e \"const fs=require('fs'); const t=JSON.parse(fs.readFileSync('./src-tauri/tauri.conf.json')); t.version=process.env.npm_package_version; fs.writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(t, null, 2)+'\\n')\" && git add src-tauri/tauri.conf.json",
+    "release:patch": "npm version patch && git push origin main && git push origin --tags",
+    "release:minor": "npm version minor && git push origin main && git push origin --tags"
   },
   "license": "MIT",
   "dependencies": {
