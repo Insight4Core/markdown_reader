@@ -10,6 +10,14 @@
     "opener:default",
     "dialog:default",
     "fs:default",
-    "process:default"
+    "process:default",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-watch",
+      "allow": [{ "path": "**" }]
+    }
   ]
 }
