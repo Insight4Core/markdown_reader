@@ -10,9 +10,14 @@
     "opener:default",
     "dialog:default",
     "fs:default",
+    "store:default",
     "process:default",
     {
       "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-read-dir",
       "allow": [{ "path": "**" }]
     },
     {

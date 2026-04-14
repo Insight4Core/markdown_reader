@@ -2,6 +2,8 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { readTextFile, watch, readDir } from '@tauri-apps/plugin-fs';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { load } from '@tauri-apps/plugin-store';
+  import { resolve, dirname } from '@tauri-apps/api/path';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { mdRender } from '@/core/markdown';
@@ -16,12 +18,78 @@
   
   let sidebarTab = $state<'files' | 'toc'>('toc');
   let folderPath = $state('');
-  let folderFiles = $state<{name: string, path: string, depth: number}[]>([]);
+  let folderFiles = $state<{name: string, path: string, depth: number, isDir?: boolean}[]>([]);
+  let collapsedFolders = $state(new Set<string>());
+
+  let searchQuery = $state('');
+  let filteredFiles = $derived(folderFiles.filter(f => (searchQuery === '' || (!f.isDir && f.name.toLowerCase().includes(searchQuery.toLowerCase())))));
+  let visibleTreeFiles = $derived(filteredFiles.filter(item => {
+    // Check if item should be hidden due to a collapsed parent
+    for (const collapsedPath of collapsedFolders) {
+      if (item.path !== collapsedPath && item.path.startsWith(collapsedPath)) {
+         return false;
+      }
+    }
+    return true;
+  }));
   let maxDepth = $state(2);
+  let sidebarWidth = $state(260);
   
   let headers = $state<{id: string, text: string, level: number}[]>([]);
   let unwatch: (() => void) | null = null;
   
+  // Persistent Store Logic
+  let store: any = null;
+  let isStoreReady = false;
+
+  async function syncStore() {
+    if (!isStoreReady || !store) return;
+    await store.set('folderPath', folderPath);
+    await store.set('filePath', filePath);
+    await store.set('maxDepth', maxDepth);
+    await store.set('sidebarWidth', sidebarWidth);
+    await store.save();
+    console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth});
+  }
+
+
+  $effect(() => {
+    async function initSettings() {
+      try {
+        store = await load('.settings.dat', { autoSave: false });
+        
+        const savedDepth = await store.get<{value?: number} | number>('maxDepth');
+        if (savedDepth) maxDepth = typeof savedDepth === 'number' ? savedDepth : (savedDepth.value || maxDepth);
+
+        const savedWidth = await store.get<{value?: number} | number>('sidebarWidth');
+        if (savedWidth) sidebarWidth = typeof savedWidth === 'number' ? savedWidth : (savedWidth.value || sidebarWidth);
+
+        const savedFolderPath = await store.get<{value?: string} | string>('folderPath');
+        if (savedFolderPath) {
+          let fp = typeof savedFolderPath === 'string' ? savedFolderPath : savedFolderPath.value;
+          if (fp) {
+             folderPath = fp;
+             scanFolder(folderPath, 1).then(files => { folderFiles = files; });
+          }
+        }
+
+        const savedFilePath = await store.get<{value?: string} | string>('filePath');
+        if (savedFilePath) {
+          let fp = typeof savedFilePath === 'string' ? savedFilePath : savedFilePath.value;
+          if (fp) {
+             await openSpecificFile(fp);
+          }
+        }
+        console.log("[Store] Loaded data:", await store.entries());
+      } catch (e) {
+        console.error("[Store] Failed to load settings:", e);
+      } finally {
+        if (store) isStoreReady = true;
+      }
+    }
+    initSettings();
+  });
+
   $effect(() => {
     if (typeof document !== 'undefined') {
       if (showSidebar) {
@@ -88,10 +156,10 @@
       }
   }
 
-  async function scanFolder(currentPath: string, currentDepth: number): Promise<{name: string, path: string, depth: number}[]> {
+  async function scanFolder(currentPath: string, currentDepth: number): Promise<{name: string, path: string, depth: number, isDir?: boolean}[]> {
     if (currentDepth > maxDepth) return [];
     
-    let results: {name: string, path: string, depth: number}[] = [];
+    let results: {name: string, path: string, depth: number, isDir?: boolean}[] = [];
     try {
       const entries = await readDir(currentPath);
       for (const entry of entries) {
@@ -99,7 +167,10 @@
           const fullPath = currentPath + (currentPath.endsWith('/') || currentPath.endsWith('\\') ? '' : '/') + entry.name;
           if (entry.isDirectory) {
             const subFiles = await scanFolder(fullPath, currentDepth + 1);
-            results = [...results, ...subFiles];
+            if (subFiles.length > 0) {
+              results.push({ name: entry.name, path: fullPath, depth: currentDepth, isDir: true });
+              results = [...results, ...subFiles];
+            }
           } else if (entry.isFile && (entry.name.endsWith('.md') || entry.name.endsWith('.markdown') || entry.name.endsWith('.mdx'))) {
             results.push({ name: entry.name, path: fullPath, depth: currentDepth });
           }
@@ -120,11 +191,11 @@
     
     if (selected) {
       folderPath = selected as string;
+      filePath = '';
+      markdownHtml = '';
       folderFiles = await scanFolder(folderPath, 1);
       sidebarTab = 'files';
-      if (folderFiles.length > 0) {
-        openSpecificFile(folderFiles[0].path);
-      }
+      syncStore();
     }
   }
 
@@ -147,11 +218,14 @@
   }
 
   async function openSpecificFile(path: string) {
+    if (!path) return;
     filePath = path;
     getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || 'Markdown Reader');
     sidebarTab = 'toc'; // 需求：点击后自动跳转大纲模式
     await loadContent();
     
+    syncStore();
+
     if (unwatch) unwatch();
     try {
       unwatch = await watch(filePath, () => {
@@ -166,10 +240,67 @@
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   }
+
+  async function handleMarkdownClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    const aTag = target.closest('a');
+    if (aTag) {
+      const href = aTag.getAttribute('href');
+      if (href && !href.startsWith('http') && !href.startsWith('#')) {
+        e.preventDefault();
+        try {
+          const dir = await dirname(filePath);
+          let resolved = await resolve(dir, href);
+          if (resolved) {
+            openSpecificFile(resolved);
+          }
+        } catch(err) {
+          console.error("Link resolve failed", err);
+        }
+      }
+    }
+  }
+
+  function toggleFolder(path: string) {
+    if (collapsedFolders.has(path)) {
+      collapsedFolders.delete(path);
+    } else {
+      collapsedFolders.add(path);
+    }
+    // trigger state reactivate gracefully for Sets
+    collapsedFolders = new Set(collapsedFolders);
+  }
+
+  // Sidebar drag to resize
+  let isResizing = false;
+  function startResize(e: MouseEvent) {
+    isResizing = true;
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResize);
+  }
+
+  function handleMouseMove(e: MouseEvent) {
+    if (!isResizing) return;
+    let newWidth = e.clientX;
+    if (newWidth < 200) newWidth = 200;
+    if (newWidth > 800) newWidth = 800;
+    sidebarWidth = newWidth;
+  }
+
+  function stopResize() {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = 'default';
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', stopResize);
+      syncStore(); // Persist width
+    }
+  }
 </script>
 
 
-<div class="md-reader" ondblclick={() => { if (!filePath) openFile(); }}>
+<div class="md-reader" ondblclick={() => { if (!filePath) openFile(); }} style="--side-width: {sidebarWidth}px;">
   <div class="md-reader__side">
     <div class="sidebar-tabs">
       <button class={sidebarTab === 'files' ? 'active' : ''} onclick={() => sidebarTab = 'files'}>📁 文件库</button>
@@ -178,15 +309,26 @@
     
     <div class="sidebar-content">
       {#if sidebarTab === 'files'}
+        <div style="padding: 10px 15px; border-bottom: 1px solid rgba(125,125,125,0.1);">
+          <input type="text" bind:value={searchQuery} placeholder="🔍 搜索文件..." class="search-input" />
+        </div>
         <ul style="margin:0; padding:0; list-style: none;">
-          {#if folderFiles.length === 0}
-             <li style="padding: 10px 22px; color: #666; font-size: 13px;">无 Markdown 文件</li>
+          {#if visibleTreeFiles.length === 0}
+             <li style="padding: 10px 22px; color: #666; font-size: 13px;">无匹配的 Markdown 文件</li>
           {:else}
-             {#each folderFiles as f}
-               <li class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {10 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
-                 <span class="file-icon">📝</span>
-                 <span class="file-name" title={f.name}>{f.name}</span>
-               </li>
+             {#each visibleTreeFiles as f}
+               {#if f.isDir}
+                 <li class="folder-item" style="padding-left: {10 + (f.depth - 1) * 12}px; font-weight: bold; color: rgba(0, 122, 204, 0.8); cursor: pointer; padding-top: 8px; padding-bottom: 4px; user-select: none;" onclick={() => toggleFolder(f.path)}>
+                   <span class="file-icon" style="display:inline-block; width:16px; margin-right: 4px;">{collapsedFolders.has(f.path) ? '▶' : '▼'}</span>
+                   <span class="file-icon">📁</span>
+                   <span class="file-name" title={f.name}>{f.name}</span>
+                 </li>
+               {:else}
+                 <li class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
+                   <span class="file-icon">📝</span>
+                   <span class="file-name" title={f.name}>{f.name}</span>
+                 </li>
+               {/if}
              {/each}
           {/if}
         </ul>
@@ -206,12 +348,24 @@
         </ul>
       {/if}
     </div>
+    
+    <!-- Resizer Handle -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="sidebar-resizer" onmousedown={startResize}></div>
   </div>
 
   <div class="md-reader__body">
-    <div class="md-reader__markdown-content centered">
-      {@html markdownHtml}
-    </div>
+    {#if !filePath}
+      <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height: 100vh; color: #888; font-family: system-ui; text-align: center;">
+        <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.8;">📚</div>
+        <h2 style="color: rgba(0, 122, 204, 0.8); margin-bottom: 10px; font-weight: 500;">欢迎来到您的知识库</h2>
+        <p style="font-size: 14px; margin-bottom: 24px;">请在左侧栏选择一个 Markdown 文档开始阅读</p>
+      </div>
+    {:else}
+      <div class="md-reader__markdown-content centered" onclick={handleMarkdownClick}>
+        {@html markdownHtml}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -262,6 +416,22 @@
     backdrop-filter: blur(16px);
     border: 1px solid rgba(200,200,200,0.3);
   }
+  
+  .sidebar-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 10;
+    transition: background 0.2s;
+  }
+  .sidebar-resizer:hover, .sidebar-resizer:active {
+    background: rgba(0, 122, 204, 0.3);
+  }
+  
+  /* Sidebar Tabs */
   @media (prefers-color-scheme: dark) {
     .glass { background: rgba(30, 30, 30, 0.8); border: 1px solid rgba(100,100,100,0.3); }
   }
@@ -301,9 +471,25 @@
   }
   
   /* Sidebar Content lists */
+  .search-input {
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px solid rgba(125,125,125,0.3);
+    border-radius: 6px;
+    outline: none;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.5);
+  }
+  @media (prefers-color-scheme: dark) {
+     .search-input { background: rgba(0, 0, 0, 0.2); color: #ddd; }
+  }
+  .search-input:focus { border-color: #007acc; }
+
   .sidebar-content {
-    height: calc(100vh - 45px);
+    flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
   }
   .file-item {
     padding: 8px 15px;

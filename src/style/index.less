@@ -1,5 +1,5 @@
 @import url('./variable.less');
-@side-width: 260px;
+@side-width: var(--side-width, 260px);
 
 body.md-reader {
   margin: 0;
@@ -18,7 +18,9 @@ body.md-reader {
 
   .md-reader {
     &__side {
-      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       position: fixed;
       top: 0;
       bottom: 0;
