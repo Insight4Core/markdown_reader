@@ -2,8 +2,8 @@
   <!-- TODO: Replace with the actual URL to your logo when you upload it -->
   <!-- <img src="./src-tauri/icons/128x128.png" alt="Markdown Reader Logo" width="128"> -->
   
-  <h1>Markdown Reader</h1>
-  <p><strong>A lightning-fast, beautifully designed Markdown Knowledge Base for desktop.</strong></p>
+  <h1>Pyrus (Local Knowledge Base Edition)</h1>
+  <p><strong>A lightning-fast, beautifully designed cross-platform desktop Markdown continuous reader and knowledge management tool.</strong></p>
 
   <p>
     [<strong>🇺🇸 English</strong>] | [<a href="./README_zh-CN.md">🇨🇳 简体中文</a>]

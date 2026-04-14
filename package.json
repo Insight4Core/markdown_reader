@@ -1,7 +1,7 @@
 {
-  "name": "markdown-reader",
+  "name": "pyrus",
   "version": "0.1.5",
-  "description": "Markdown Reader Desktop Edition",
+  "description": "Pyrus - Knowledge Base Platform",
   "type": "module",
   "scripts": {
     "dev": "vite dev",

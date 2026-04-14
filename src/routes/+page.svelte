@@ -2,8 +2,9 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { readTextFile, watch, readDir } from '@tauri-apps/plugin-fs';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { load } from '@tauri-apps/plugin-store';
+  import { Store, load } from '@tauri-apps/plugin-store';
   import { resolve, dirname } from '@tauri-apps/api/path';
+  import { i18nState, t, detectSystemLanguage } from '$lib/i18n.svelte';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { mdRender } from '@/core/markdown';
@@ -48,8 +49,9 @@
     await store.set('filePath', filePath);
     await store.set('maxDepth', maxDepth);
     await store.set('sidebarWidth', sidebarWidth);
+    await store.set('locale', i18nState.locale);
     await store.save();
-    console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth});
+    console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth, locale: i18nState.locale});
   }
 
 
@@ -58,6 +60,15 @@
       try {
         store = await load('.settings.dat', { autoSave: false });
         
+        const savedLocale = await store.get<{value?: string} | string>('locale');
+        if (savedLocale) {
+            i18nState.locale = typeof savedLocale === 'string' ? savedLocale : (savedLocale.value || 'zh');
+        } else {
+            i18nState.locale = detectSystemLanguage();
+            // Automatically persist detection for future runs
+            if (store) store.set('locale', i18nState.locale);
+        }
+
         const savedDepth = await store.get<{value?: number} | number>('maxDepth');
         if (savedDepth) maxDepth = typeof savedDepth === 'number' ? savedDepth : (savedDepth.value || maxDepth);
 
@@ -220,9 +231,12 @@
   async function openSpecificFile(path: string) {
     if (!path) return;
     filePath = path;
-    getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || 'Markdown Reader');
+    getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || 'Pyrus');
     sidebarTab = 'toc'; // 需求：点击后自动跳转大纲模式
     await loadContent();
+    
+    // Reset scroll position to top for the new file
+    window.scrollTo({ top: 0, behavior: 'auto' });
     
     syncStore();
 
@@ -249,8 +263,9 @@
       if (href && !href.startsWith('http') && !href.startsWith('#')) {
         e.preventDefault();
         try {
+          const decodedHref = decodeURIComponent(href);
           const dir = await dirname(filePath);
-          let resolved = await resolve(dir, href);
+          let resolved = await resolve(dir, decodedHref);
           if (resolved) {
             openSpecificFile(resolved);
           }
@@ -303,18 +318,18 @@
 <div class="md-reader" ondblclick={() => { if (!filePath) openFile(); }} style="--side-width: {sidebarWidth}px;">
   <div class="md-reader__side">
     <div class="sidebar-tabs">
-      <button class={sidebarTab === 'files' ? 'active' : ''} onclick={() => sidebarTab = 'files'}>📁 文件库</button>
-      <button class={sidebarTab === 'toc' ? 'active' : ''} onclick={() => sidebarTab = 'toc'}>📄 大纲</button>
+      <button class={sidebarTab === 'files' ? 'active' : ''} onclick={() => sidebarTab = 'files'}>{t('sidebar.files')}</button>
+      <button class={sidebarTab === 'toc' ? 'active' : ''} onclick={() => sidebarTab = 'toc'}>{t('sidebar.toc')}</button>
     </div>
     
     <div class="sidebar-content">
       {#if sidebarTab === 'files'}
         <div style="padding: 10px 15px; border-bottom: 1px solid rgba(125,125,125,0.1);">
-          <input type="text" bind:value={searchQuery} placeholder="🔍 搜索文件..." class="search-input" />
+          <input type="text" bind:value={searchQuery} placeholder={t('sidebar.search_placeholder')} class="search-input" />
         </div>
         <ul style="margin:0; padding:0; list-style: none;">
           {#if visibleTreeFiles.length === 0}
-             <li style="padding: 10px 22px; color: #666; font-size: 13px;">无匹配的 Markdown 文件</li>
+             <li style="padding: 10px 22px; color: #666; font-size: 13px;">{t('sidebar.no_md_match')}</li>
           {:else}
              {#each visibleTreeFiles as f}
                {#if f.isDir}
@@ -335,7 +350,7 @@
       {:else}
         <ul style="margin:0; padding:0;">
           {#if headers.length === 0}
-            <li style="padding: 10px 22px; color: #666;">暂无目录</li>
+            <li style="padding: 10px 22px; color: #666;">{t('sidebar.no_toc')}</li>
           {:else}
             {#each headers as h}
               <li class="md-reader__side-h{h.level}">
@@ -358,8 +373,8 @@
     {#if !filePath}
       <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height: 100vh; color: #888; font-family: system-ui; text-align: center;">
         <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.8;">📚</div>
-        <h2 style="color: rgba(0, 122, 204, 0.8); margin-bottom: 10px; font-weight: 500;">欢迎来到您的知识库</h2>
-        <p style="font-size: 14px; margin-bottom: 24px;">请在左侧栏选择一个 Markdown 文档开始阅读</p>
+        <h2 style="color: rgba(0, 122, 204, 0.8); margin-bottom: 10px; font-weight: 500;">{t('welcome.title')}</h2>
+        <p style="font-size: 14px; margin-bottom: 24px;">{t('welcome.subtitle')}</p>
       </div>
     {:else}
       <div class="md-reader__markdown-content centered" onclick={handleMarkdownClick}>
@@ -375,24 +390,36 @@
 
 {#if drawerOpen}
 <div class="drawer glass">
-  <h3>偏好设置</h3>
-  <button onclick={openFile} class="btn-primary">📄 打开单篇 Markdown 文件</button>
-  <button onclick={openFolder} class="btn-primary" style="background:#2ea44f;">📁 指定知识库文件夹</button>
+  <h3>{t('settings.title')}</h3>
+  <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
+  <button onclick={openFolder} class="btn-primary" style="background:#2ea44f;">{t('settings.open_folder')}</button>
   <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
   
   <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
     <div style="display:flex; justify-content:space-between;">
-       <label>📁 文件夹扫描深度: <b>{maxDepth} 层</b></label>
-       {#if folderPath}
-         <span style="color:#007acc; cursor:pointer;" onclick={refreshFolder}>刷新扫描</span>
-       {/if}
+       <label>{t('settings.sys_language')}</label>
+       <select bind:value={i18nState.locale} onchange={syncStore} style="padding:2px 4px; border-radius:4px; border:1px solid #ccc;">
+         <option value="zh">中文</option>
+         <option value="en">English</option>
+       </select>
     </div>
-    <input type="range" bind:value={maxDepth} min="1" max="5" style="width:100%" onchange={refreshFolder} />
-    <span style="font-size: 12px; color:#888;">调大后会读取内部嵌套更深的子文件夹文件。</span>
   </div>
 
   <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
-  <label><input type="checkbox" bind:checked={showSidebar} /> 开启侧边栏</label>
+
+  <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
+    <div style="display:flex; justify-content:space-between;">
+       <label>{t('settings.scan_depth')}: <b>{maxDepth} {t('settings.layers')}</b></label>
+       {#if folderPath}
+         <span style="color:#007acc; cursor:pointer;" onclick={refreshFolder}>{t('settings.refresh')}</span>
+       {/if}
+    </div>
+    <input type="range" bind:value={maxDepth} min="1" max="5" style="width:100%" onchange={refreshFolder} />
+    <span style="font-size: 12px; color:#888;">{t('settings.depth_hint')}</span>
+  </div>
+
+  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  <label><input type="checkbox" bind:checked={showSidebar} /> {t('settings.toggle_sidebar')}</label>
 </div>
 {/if}
 

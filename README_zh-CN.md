@@ -2,7 +2,7 @@
   <!-- TODO: 在此处替换为你在 Github 上的真实 Logo URL -->
   <!-- <img src="./src-tauri/icons/128x128.png" alt="Markdown Reader Logo" width="128"> -->
   
-  <h1>Markdown Reader (本地知识库版)</h1>
+  <h1>Pyrus (本地知识库版)</h1>
   <p><strong>一个快如闪电、设计精美的跨平台桌面端 Markdown 连载阅读与知识库管理利器。</strong></p>
 
   <p>
