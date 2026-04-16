@@ -37,7 +37,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2REVFMjVGQkEwNzEyMEYKUldRUEVnZTZYK0xlOWlhVGZlOEZuSTRRM0tXRFJWZFhudUs0cWRFbzYwWmYwdU9vK2ZFT1VPZlQK",
       "endpoints": [
-        "https://github.com/Insight4Core/markdown_reader/releases/latest/download/updater.json"
+        "https://github.com/Insight4Core/markdown_reader/releases/latest/download/latest.json"
       ]
     }
   }
