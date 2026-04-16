@@ -19,7 +19,13 @@ export const translations: Record<string, Record<string, string>> = {
     'settings.sys_language': '🌐 语言 (Language)',
     'settings.toggle_sidebar': '开启侧边栏',
     
-    'misc.reader_title': '阅读器'
+    'update.new_version': '发现新版本',
+    'update.content': '更新内容',
+    'update.regular': '常规功能升级与优化',
+    'update.prompt': '是否立即下载并在后台重启更新',
+    'update.title': '升级提示',
+    
+    'misc.reader_title': 'Pyrus'
   },
   en: {
     'sidebar.files': 'Explorer',
@@ -41,7 +47,13 @@ export const translations: Record<string, Record<string, string>> = {
     'settings.sys_language': '🌐 Language',
     'settings.toggle_sidebar': 'Enable Sidebar',
     
-    'misc.reader_title': 'Reader'
+    'update.new_version': 'New version available',
+    'update.content': 'Release Notes',
+    'update.regular': 'General improvements and bug fixes',
+    'update.prompt': 'Download and restart to apply the update',
+    'update.title': 'Update Prompt',
+    
+    'misc.reader_title': 'Pyrus'
   }
 };
 

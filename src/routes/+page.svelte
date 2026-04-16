@@ -118,7 +118,7 @@
       try {
         const update = await check();
         if (update && update.available) {
-          const yes = await ask(`发现新版本 ${update.version}！\n\n更新内容: ${update.body || '常规更新'}\n\n是否立即下载并重启更新？`, { title: 'Markdown Reader 升级提示', kind: 'info' });
+          const yes = await ask(`${t('update.new_version')} ${update.version}！\n\n${t('update.content')}: ${update.body || t('update.regular')}\n\n${t('update.prompt')}？`, { title: `Pyrus ${t('update.title')}`, kind: 'info' });
           if (yes) {
             await update.downloadAndInstall();
             await relaunch();
