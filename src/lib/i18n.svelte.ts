@@ -24,6 +24,10 @@ export const translations: Record<string, Record<string, string>> = {
     'update.regular': '常规功能升级与优化',
     'update.prompt': '是否立即下载并在后台重启更新',
     'update.title': '升级提示',
+    'update.check_btn': '🔄 检查更新',
+    'update.checking': '检查中...',
+    'update.up_to_date': '您贴心的 Pyrus 当前已是最新版本！',
+    'update.error': '网络通讯或配置问题，检查更新失败：',
     
     'misc.reader_title': 'Pyrus'
   },
@@ -52,6 +56,10 @@ export const translations: Record<string, Record<string, string>> = {
     'update.regular': 'General improvements and bug fixes',
     'update.prompt': 'Download and restart to apply the update',
     'update.title': 'Update Prompt',
+    'update.check_btn': '🔄 Check for Updates',
+    'update.checking': 'Checking...',
+    'update.up_to_date': 'Your Pyrus is already up to date!',
+    'update.error': 'Failed to check for updates due to network or config error: ',
     
     'misc.reader_title': 'Pyrus'
   }

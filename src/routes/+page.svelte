@@ -113,22 +113,38 @@
     }
   });
 
-  $effect(() => {
-    async function checkUpdate() {
-      try {
-        const update = await check();
-        if (update && update.available) {
-          const yes = await ask(`${t('update.new_version')} ${update.version}！\n\n${t('update.content')}: ${update.body || t('update.regular')}\n\n${t('update.prompt')}？`, { title: `Pyrus ${t('update.title')}`, kind: 'info' });
-          if (yes) {
-            await update.downloadAndInstall();
-            await relaunch();
-          }
+  let isCheckingUpdate = $state(false);
+
+  async function checkUpdate(manual = false) {
+    if (isCheckingUpdate) return;
+    isCheckingUpdate = true;
+    try {
+      const update = await check();
+      if (update && update.available) {
+        const yes = await ask(`${t('update.new_version')} ${update.version}！\n\n${t('update.content')}: ${update.body || t('update.regular')}\n\n${t('update.prompt')}？`, { title: `Pyrus ${t('update.title')}`, kind: 'info' });
+        if (yes) {
+          await update.downloadAndInstall();
+          await relaunch();
         }
-      } catch (e) {
-        console.warn("Auto-updater check failed:", e);
+      } else if (manual) {
+        await ask(t('update.up_to_date'), { title: `Pyrus ${t('update.title')}`, kind: 'info' });
       }
+    } catch (e: any) {
+      console.warn("Auto-updater check failed:", e);
+      if (manual) {
+        await ask(`${t('update.error')} ${e.message || String(e)}`, { title: `Pyrus ${t('update.title')}`, kind: 'error' });
+      }
+    } finally {
+      isCheckingUpdate = false;
     }
-    checkUpdate();
+  }
+
+  $effect(() => {
+    const hasChecked = sessionStorage.getItem('has_checked_update');
+    if (!hasChecked) {
+      checkUpdate(false);
+      sessionStorage.setItem('has_checked_update', '1');
+    }
   });
   
   async function loadContent() {
@@ -404,6 +420,12 @@
        </select>
     </div>
   </div>
+
+  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  
+  <button onclick={() => checkUpdate(true)} class="btn-primary" style="background:#58a6ff;" disabled={isCheckingUpdate}>
+    {isCheckingUpdate ? t('update.checking') : t('update.check_btn')}
+  </button>
 
   <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
 
