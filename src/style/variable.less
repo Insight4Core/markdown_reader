@@ -1,6 +1,11 @@
 @import url('@md-reader/theme');
 
 .light() {
+  --font-family-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  --font-family-headings: inherit;
+  --font-family-code: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --line-height-body: 1.6;
+  --letter-spacing-body: normal;
   --color-white: #fff;
   --color-primary: #607cd2;
   --color-primary--hover: #4c68bb;
@@ -52,6 +57,11 @@
 }
 
 .dark() {
+  --font-family-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  --font-family-headings: inherit;
+  --font-family-code: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --line-height-body: 1.6;
+  --letter-spacing-body: normal;
   --color-white: #fff;
   --color-primary: #6785e0;
   --color-primary--hover: #7191f3;
@@ -101,22 +111,203 @@
   .highlight();
 }
 
+.theme-terminal() {
+  --font-family-body: "Fira Code", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-family-headings: "Fira Code", ui-monospace, SFMono-Regular, monospace;
+  --font-family-code: inherit;
+  --line-height-body: 1.7;
+  --letter-spacing-body: 0.02em;
+  --color-white: #eceff4;
+  --color-primary: #88c0d0;
+  --color-primary--hover: #81a1c1;
+  --color-primary-alpha-10: rgba(136, 192, 208, 0.1);
+  --color-important: #b48ead;
+  --color-important-alpha-10: rgba(180, 142, 173, 0.1);
+  --color-success: #a3be8c;
+  --color-success-alpha-10: rgba(163, 190, 140, 0.1);
+  --color-warning: #ebcb8b;
+  --color-warning-alpha-10: rgba(235, 203, 139, 0.1);
+  --color-danger: #bf616a;
+  --color-danger-alpha-10: rgba(191, 97, 106, 0.1);
+  --color-mark: #d08770;
+  --color-text-primary: #d8dee9;
+  --color-text-secondary: #e5e9f0;
+  --color-text-gray: #4c566a;
+  --color-border: #434c5e;
+  --color-bg: #2e3440;
+  --color-side: var(--color-text-primary);
+  --color-side-bg: #242933;
+  --color-side-border: #3b4252;
+  --color-side-shadow: 0 0 5px rgba(0, 0, 0, 0.1), 0 0 20px rgba(0, 0, 0, 0.3);
+  --color-img-bg: #3b4252;
+  --color-block-bg: #3b4252;
+  --color-code-bg: #434c5e;
+  --color-thead-bg: #434c5e;
+  --color-disabled: #4c566a;
+  --color-button: fade(#d8dee9, 40%);
+  --color-button-bg: none;
+  --color-button-hover: fade(#d8dee9, 60%);
+  --color-button-bg-hover: fade(#434c5e, 50%);
+  --color-button-active: fade(#d8dee9, 80%);
+  --color-button-bg-active: fade(#4c566a, 50%);
+  --shadow-button-text: 0.5px 0.5px 1px rgba(0, 0, 0, 0.12);
+  --color-button_copy: fade(#d8dee9, 70%);
+  --color-button_copy-bg: var(--color-button-bg);
+  --color-button_copy-hover: fade(#d8dee9, 90%);
+  --color-button_copy-bg-hover: fade(#434c5e, 80%);
+  --color-button_copy-active: fade(#d8dee9, 90%);
+  --color-button_copy-bg-active: fade(#4c566a, 60%);
+  --size-scrollbar: 6.5px;
+  --color-scrollbar-thumb: fade(#eceff4, 20%);
+  --color-scrollbar-thumb-hover: fade(#eceff4, 30%);
+  --color-modal-bg: rgba(46, 52, 64, 0.8);
+  --opacity-img: 0.9;
+  .hljs-dark();
+  .highlight();
+}
+
+.theme-newsprint() {
+  --font-family-body: Georgia, "Times New Roman", "Songti SC", "Noto Serif CJK SC", serif;
+  --font-family-headings: "Palatino Linotype", "Book Antiqua", Palatino, "Songti SC", serif;
+  --font-family-code: "Courier New", Courier, monospace;
+  --line-height-body: 1.8;
+  --letter-spacing-body: 0.03em;
+  --color-white: #ffffff;
+  --color-primary: #121212;
+  --color-primary--hover: #2e2e2e;
+  --color-primary-alpha-10: rgba(18, 18, 18, 0.05);
+  --color-important: #e76262;
+  --color-important-alpha-10: rgba(231, 98, 98, 0.1);
+  --color-success: #0f8b4d;
+  --color-success-alpha-10: rgba(15, 139, 77, 0.1);
+  --color-warning: #eab420;
+  --color-warning-alpha-10: rgba(234, 180, 32, 0.1);
+  --color-danger: #ea3636;
+  --color-danger-alpha-10: rgba(234, 54, 54, 0.1);
+  --color-mark: #fdf2c8;
+  --color-text-primary: #37352f;
+  --color-text-secondary: #787774;
+  --color-text-gray: #9e9c97;
+  --color-border: #ededed;
+  --color-bg: #ffffff;
+  --color-side: var(--color-text-secondary);
+  --color-side-bg: #f7f6f3;
+  --color-side-border: #e8e8e8;
+  --color-side-shadow: 0 0 0 rgba(0,0,0,0);
+  --color-img-bg: #f9f9f9;
+  --color-block-bg: #f7f6f3;
+  --color-code-bg: #f2f2f2;
+  --color-thead-bg: #f7f6f3;
+  --color-disabled: #e1e1e1;
+  --color-button: fade(#37352f, 40%);
+  --color-button-bg: none;
+  --color-button-hover: fade(#37352f, 60%);
+  --color-button-bg-hover: fade(#e1e1e1, 60%);
+  --color-button-active: fade(#37352f, 80%);
+  --color-button-bg-active: fade(#cdcdcd, 50%);
+  --shadow-button-text: none;
+  --color-button_copy: var(--color-button);
+  --color-button_copy-bg: var(--color-button-bg);
+  --color-button_copy-hover: var(--color-button-hover);
+  --color-button_copy-bg-hover: fade(#e1e1e1, 80%);
+  --color-button_copy-active: var(--color-button-active);
+  --color-button_copy-bg-active: fade(#cdcdcd, 60%);
+  --size-scrollbar: 6.5px;
+  --color-scrollbar-thumb: fade(#000, 15%);
+  --color-scrollbar-thumb-hover: fade(#000, 25%);
+  --color-modal-bg: rgba(255, 255, 255, 0.7);
+  --opacity-img: 1;
+  .hljs-light();
+  .highlight();
+}
+
+.theme-glass() {
+  --font-family-body: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-family-headings: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-family-code: "SF Mono", Menlo, Consolas, Monaco, monospace;
+  --line-height-body: 1.8;
+  --letter-spacing-body: 0.05em;
+  --color-white: #fff;
+  --color-primary: #10b981;
+  --color-primary--hover: #059669;
+  --color-primary-alpha-10: rgba(16, 185, 129, 0.15);
+  --color-important: #8b5cf6;
+  --color-important-alpha-10: rgba(139, 92, 246, 0.15);
+  --color-success: #10b981;
+  --color-success-alpha-10: rgba(16, 185, 129, 0.15);
+  --color-warning: #f59e0b;
+  --color-warning-alpha-10: rgba(245, 158, 11, 0.15);
+  --color-danger: #ef4444;
+  --color-danger-alpha-10: rgba(239, 68, 68, 0.15);
+  --color-mark: rgba(245, 158, 11, 0.2);
+  --color-text-primary: #e2e8f0;
+  --color-text-secondary: #94a3b8;
+  --color-text-gray: #64748b;
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-bg: rgba(15, 23, 42, 0.85);
+  --color-side: var(--color-text-secondary);
+  --color-side-bg: rgba(30, 41, 59, 0.5);
+  --color-side-border: rgba(255, 255, 255, 0.05);
+  --color-side-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+  --color-img-bg: rgba(255, 255, 255, 0.05);
+  --color-block-bg: rgba(255, 255, 255, 0.03);
+  --color-code-bg: rgba(0, 0, 0, 0.2);
+  --color-thead-bg: rgba(255, 255, 255, 0.05);
+  --color-disabled: #475569;
+  --color-button: fade(#e2e8f0, 60%);
+  --color-button-bg: rgba(255, 255, 255, 0.05);
+  --color-button-hover: #e2e8f0;
+  --color-button-bg-hover: rgba(255, 255, 255, 0.1);
+  --color-button-active: #ffffff;
+  --color-button-bg-active: rgba(255, 255, 255, 0.15);
+  --shadow-button-text: 0.5px 0.5px 1px rgba(0, 0, 0, 0.2);
+  --color-button_copy: var(--color-button);
+  --color-button_copy-bg: var(--color-button-bg);
+  --color-button_copy-hover: var(--color-button-hover);
+  --color-button_copy-bg-hover: var(--color-button-bg-hover);
+  --color-button_copy-active: var(--color-button-active);
+  --color-button_copy-bg-active: var(--color-button-bg-active);
+  --size-scrollbar: 6.5px;
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+  --color-modal-bg: rgba(15, 23, 42, 0.8);
+  --opacity-img: 0.95;
+  .hljs-dark();
+  .highlight();
+}
+
+
 :root {
   .light();
   @media (prefers-color-scheme: dark) {
     .dark();
   }
-  &[data-md-reader-theme='light'] .md-reader {
+  &[data-md-reader-theme='light'] .md-reader,
+  &[data-md-reader-theme='light'] body {
     .light();
   }
-  &[data-md-reader-theme='dark'] .md-reader {
+  &[data-md-reader-theme='dark'] .md-reader,
+  &[data-md-reader-theme='dark'] body {
     .dark();
   }
+  &[data-md-reader-theme='terminal'] .md-reader,
+  &[data-md-reader-theme='terminal'] body {
+    .theme-terminal();
+  }
+  &[data-md-reader-theme='newsprint'] .md-reader,
+  &[data-md-reader-theme='newsprint'] body {
+    .theme-newsprint();
+  }
+  &[data-md-reader-theme='glass'] .md-reader,
+  &[data-md-reader-theme='glass'] body {
+    .theme-glass();
+  }
+  
   &:not([data-md-reader-theme-scheme-disabled]) {
-    &[data-md-reader-theme='light'] {
+    &[data-md-reader-theme='light'], &[data-md-reader-theme='newsprint'] {
       color-scheme: light;
     }
-    &[data-md-reader-theme='dark'] {
+    &[data-md-reader-theme='dark'], &[data-md-reader-theme='terminal'], &[data-md-reader-theme='glass'] {
       color-scheme: dark;
     }
   }

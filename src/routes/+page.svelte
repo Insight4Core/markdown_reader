@@ -16,6 +16,9 @@
   
   let drawerOpen = $state(false);
   let showSidebar = $state(true);
+  let currentTheme = $state('light');
+  let appFont = $state('auto');
+  let customFontInput = $state('');
   
   let sidebarTab = $state<'files' | 'toc'>('toc');
   let folderPath = $state('');
@@ -50,10 +53,30 @@
     await store.set('maxDepth', maxDepth);
     await store.set('sidebarWidth', sidebarWidth);
     await store.set('locale', i18nState.locale);
+    await store.set('appTheme', currentTheme);
+    await store.set('appFont', appFont);
+    await store.set('customFontInput', customFontInput);
     await store.save();
-    console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth, locale: i18nState.locale});
+    console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth, locale: i18nState.locale, appTheme: currentTheme, appFont});
   }
 
+  $effect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-md-reader-theme', currentTheme);
+    }
+  });
+
+  $effect(() => {
+    if (typeof document !== 'undefined') {
+      if (appFont === 'auto') {
+        document.body.style.removeProperty('--font-family-body');
+      } else if (appFont === 'custom' && customFontInput.trim() !== '') {
+        document.body.style.setProperty('--font-family-body', `"${customFontInput.trim()}", sans-serif`);
+      } else {
+        document.body.style.setProperty('--font-family-body', appFont);
+      }
+    }
+  });
 
   $effect(() => {
     async function initSettings() {
@@ -67,6 +90,21 @@
             i18nState.locale = detectSystemLanguage();
             // Automatically persist detection for future runs
             if (store) store.set('locale', i18nState.locale);
+        }
+
+        const savedTheme = await store.get<{value?: string} | string>('appTheme');
+        if (savedTheme) {
+            currentTheme = typeof savedTheme === 'string' ? savedTheme : (savedTheme.value || 'light');
+        }
+
+        const savedFont = await store.get<{value?: string} | string>('appFont');
+        if (savedFont) {
+            appFont = typeof savedFont === 'string' ? savedFont : (savedFont.value || 'auto');
+        }
+
+        const savedCustomFont = await store.get<{value?: string} | string>('customFontInput');
+        if (savedCustomFont) {
+            customFontInput = typeof savedCustomFont === 'string' ? savedCustomFont : (savedCustomFont.value || '');
         }
 
         const savedDepth = await store.get<{value?: number} | number>('maxDepth');
@@ -405,6 +443,9 @@
 </button>
 
 {#if drawerOpen}
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="drawer-overlay" onclick={() => drawerOpen = false} style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:80; background: transparent;"></div>
 <div class="drawer glass">
   <h3>{t('settings.title')}</h3>
   <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
@@ -419,6 +460,37 @@
          <option value="en">English</option>
        </select>
     </div>
+  </div>
+
+  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+
+  <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
+    <div style="display:flex; justify-content:space-between;">
+       <label>{t('settings.appearance')}</label>
+       <select bind:value={currentTheme} onchange={syncStore} style="padding:2px 4px; border-radius:4px; border:1px solid #ccc; max-width: 140px;">
+         <option value="light">{t('theme.light')}</option>
+         <option value="dark">{t('theme.dark')}</option>
+         <option value="newsprint">✨ {t('theme.newsprint')}</option>
+         <option value="terminal">✨ {t('theme.terminal')}</option>
+         <option value="glass">✨ {t('theme.glass')}</option>
+       </select>
+    </div>
+    <div style="display:flex; justify-content:space-between; margin-top: 5px;">
+       <label>{t('settings.typography')}</label>
+       <select bind:value={appFont} onchange={syncStore} style="padding:2px 4px; border-radius:4px; border:1px solid #ccc; max-width: 140px;">
+         <option value="auto">{t('font.auto')}</option>
+         <option value="'LXGW WenKai Lite', sans-serif">{t('font.lxgw')}</option>
+         <option value="-apple-system, sans-serif">{t('font.system')}</option>
+         <option value="Georgia, serif">{t('font.serif')}</option>
+         <option value="'Fira Code', monospace">{t('font.mono')}</option>
+         <option value="custom">{t('font.custom')}</option>
+       </select>
+    </div>
+    {#if appFont === 'custom'}
+    <div style="display:flex; justify-content:flex-end; margin-top: 5px;">
+       <input type="text" bind:value={customFontInput} onchange={syncStore} placeholder={t('font.custom_placeholder')} style="padding:4px; border-radius:4px; border:1px solid #007acc; width: 100%; font-size: 12px; outline: none;" />
+    </div>
+    {/if}
   </div>
 
   <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
@@ -461,9 +533,10 @@
     animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .glass {
-    background: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(200,200,200,0.3);
+    background: var(--color-modal-bg, rgba(255, 255, 255, 0.8));
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    border-left: 1px solid var(--color-border);
   }
   
   .sidebar-resizer {
