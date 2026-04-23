@@ -311,6 +311,27 @@
 
   async function handleMarkdownClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
+    
+    // 1. Handle Code Copy
+    const copyBtn = target.closest('.md-reader__btn--copy');
+    if (copyBtn) {
+      const codeBlock = copyBtn.previousElementSibling;
+      if (codeBlock && codeBlock.tagName.toLowerCase() === 'code') {
+        const textToCopy = codeBlock.textContent || '';
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+          copyBtn.classList.add('copied');
+          setTimeout(() => {
+            copyBtn.classList.remove('copied');
+          }, 2000);
+        } catch (err) {
+          console.error('Failed to copy text: ', err);
+        }
+      }
+      return;
+    }
+
+    // 2. Handle internal relative link clicks
     const aTag = target.closest('a');
     if (aTag) {
       const href = aTag.getAttribute('href');
