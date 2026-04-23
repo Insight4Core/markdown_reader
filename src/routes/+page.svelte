@@ -7,6 +7,7 @@
   import { i18nState, t, detectSystemLanguage } from '$lib/i18n.svelte';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
+  import { invoke } from '@tauri-apps/api/core';
   import { mdRender } from '@/core/markdown';
   import { tick } from 'svelte';
   import '@/style/index.less';
@@ -26,6 +27,40 @@
   let collapsedFolders = $state(new Set<string>());
 
   let searchQuery = $state('');
+  
+  interface SearchResult {
+    file_path: string;
+    file_name: string;
+    line_number: number;
+    snippet: string;
+  }
+  
+  let searchResults = $state<SearchResult[]>([]);
+  let isSearching = $state(false);
+  let searchTimer: any = null;
+
+  $effect(() => {
+    if (searchQuery.trim() === '') {
+       searchResults = [];
+       isSearching = false;
+       return;
+    }
+    
+    if (searchTimer) clearTimeout(searchTimer);
+    isSearching = true;
+    
+    searchTimer = setTimeout(async () => {
+       try {
+         const res = await invoke('search_content', { path: folderPath, query: searchQuery.trim() });
+         searchResults = res as SearchResult[];
+       } catch(e) {
+         console.error("Search failed:", e);
+         searchResults = [];
+       } finally {
+         isSearching = false;
+       }
+    }, 300);
+  });
   let filteredFiles = $derived(folderFiles.filter(f => (searchQuery === '' || (!f.isDir && f.name.toLowerCase().includes(searchQuery.toLowerCase())))));
   let visibleTreeFiles = $derived(filteredFiles.filter(item => {
     // Check if item should be hidden due to a collapsed parent
@@ -403,23 +438,48 @@
           <input type="text" bind:value={searchQuery} placeholder={t('sidebar.search_placeholder')} class="search-input" />
         </div>
         <ul style="margin:0; padding:0; list-style: none;">
-          {#if visibleTreeFiles.length === 0}
-             <li style="padding: 10px 22px; color: #666; font-size: 13px;">{t('sidebar.no_md_match')}</li>
+          {#if searchQuery.trim() !== ''}
+             {#if isSearching}
+               <li style="padding: 10px 22px; color: #666; font-size: 13px;">Searching full text...</li>
+             {:else if searchResults.length === 0}
+               <li style="padding: 10px 22px; color: #666; font-size: 13px;">No matching text found.</li>
+             {:else}
+               {#each searchResults as res}
+                 <!-- svelte-ignore a11y_click_events_have_key_events -->
+                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                 <li class="search-item {filePath === res.file_path ? 'active-file' : ''}" style="padding: 10px 15px; border-bottom: 1px solid rgba(125,125,125,0.1); cursor: pointer;" onclick={(e) => { e.stopPropagation(); openSpecificFile(res.file_path); }}>
+                   <div style="font-weight: 500; font-size: 13px; color: rgba(0, 122, 204, 0.9); margin-bottom: 4px;">
+                     📝 {res.file_name} <span style="font-size: 11px; color: #888; font-weight: normal; margin-left: 4px;">(L{res.line_number})</span>
+                   </div>
+                   <div style="font-size: 12px; color: var(--color-text-gray, #666); line-height: 1.4; word-break: break-all; opacity: 0.8; font-family: monospace;">
+                     {res.snippet}
+                   </div>
+                 </li>
+               {/each}
+             {/if}
           {:else}
-             {#each visibleTreeFiles as f}
-               {#if f.isDir}
-                 <li class="folder-item" style="padding-left: {10 + (f.depth - 1) * 12}px; font-weight: bold; color: rgba(0, 122, 204, 0.8); cursor: pointer; padding-top: 8px; padding-bottom: 4px; user-select: none;" onclick={() => toggleFolder(f.path)}>
-                   <span class="file-icon" style="display:inline-block; width:16px; margin-right: 4px;">{collapsedFolders.has(f.path) ? '▶' : '▼'}</span>
-                   <span class="file-icon">📁</span>
-                   <span class="file-name" title={f.name}>{f.name}</span>
-                 </li>
-               {:else}
-                 <li class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
-                   <span class="file-icon">📝</span>
-                   <span class="file-name" title={f.name}>{f.name}</span>
-                 </li>
-               {/if}
-             {/each}
+             {#if visibleTreeFiles.length === 0}
+                <li style="padding: 10px 22px; color: #666; font-size: 13px;">{t('sidebar.no_md_match')}</li>
+             {:else}
+                {#each visibleTreeFiles as f}
+                  {#if f.isDir}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                    <li class="folder-item" style="padding-left: {10 + (f.depth - 1) * 12}px; font-weight: bold; color: rgba(0, 122, 204, 0.8); cursor: pointer; padding-top: 8px; padding-bottom: 4px; user-select: none;" onclick={() => toggleFolder(f.path)}>
+                      <span class="file-icon" style="display:inline-block; width:16px; margin-right: 4px;">{collapsedFolders.has(f.path) ? '▶' : '▼'}</span>
+                      <span class="file-icon">📁</span>
+                      <span class="file-name" title={f.name}>{f.name}</span>
+                    </li>
+                  {:else}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                    <li class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
+                      <span class="file-icon">📝</span>
+                      <span class="file-name" title={f.name}>{f.name}</span>
+                    </li>
+                  {/if}
+                {/each}
+             {/if}
           {/if}
         </ul>
       {:else}
