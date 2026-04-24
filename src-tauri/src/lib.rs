@@ -93,6 +93,22 @@ async fn search_content(path: String, query: String) -> Result<Vec<SearchResult>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let args: Vec<String> = std::env::args().collect();
+            if args.len() > 1 {
+                let possible_path = &args[1];
+                if !possible_path.starts_with("--") {
+                    use tauri::Emitter;
+                    let path_clone = possible_path.clone();
+                    let app_handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        let _ = app_handle.emit("sys-open-file", path_clone);
+                    });
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -100,6 +116,19 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet, search_content])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            use tauri::Emitter;
+            if let tauri::RunEvent::Opened { urls } = event {
+                if let Some(url) = urls.first() {
+                    let path = url.path().to_string();
+                    let app_h = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        let _ = app_h.emit("sys-open-file", path);
+                    });
+                }
+            }
+        });
 }

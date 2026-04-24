@@ -8,9 +8,25 @@
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { mdRender } from '@/core/markdown';
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import '@/style/index.less';
+
+  onMount(() => {
+    listen('sys-open-file', (event) => {
+      const path = event.payload as string;
+      if (path && typeof path === 'string') {
+        let cleanPath = path;
+        // Handle macOS file:// URLs if necessary
+        if (cleanPath.startsWith('file://')) {
+          cleanPath = decodeURIComponent(cleanPath.slice(7));
+        }
+        console.log("Received file from OS:", cleanPath);
+        openSpecificFile(cleanPath);
+      }
+    });
+  });
 
   let markdownHtml = $state('<div style="text-align: center; margin-top: 40vh; color: #888;">Double click anywhere or click the gear to open a markdown file.</div>');
   let filePath = $state('');
