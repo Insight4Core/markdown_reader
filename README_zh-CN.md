@@ -18,14 +18,16 @@
 
 <br />
 
-## ✨ 核心亮点
+## ✨ 核心亮点 (Unfair Advantages)
 
-- ⚡️ **极速轻量**：由原生 Rust 🦀 与 Tauri v2 底层驱动，摒弃沉重架构，尽享丝滑原生桌面体验。
-- 🗂️ **本地知识库透视**：一键挂载任意本地工作文件夹。强大且深度的全目录体系递归扫描，让凌乱的 `.md` 文件井然有序列在侧边栏。 
-- 📑 **双核无缝导航**：独创选项卡交互逻辑，单击鼠标即可在**“全库文件目录”**与**“当前文章大纲 (TOC)”**之间来回丝滑切换。
-- 🎨 **前沿的富文本解析**：内置全栈 Markdown 解析链，深度支持代码高亮标注、Katex 数学公式、Mermaid 数据流图谱、复选任务列表、EmoJi 渲染及 GitHub 式脚注高光支持。
-- 🔄 **毫秒级热更感知**：借助系统底层 File System 原生监听，在你使用 Obsidian / VSCode 编辑文档的同时，阅读器界面实现 100毫秒级无感热刷新，完全无需手动保存或刷新。
-- ☁️ **云端自动分发更新**：内置静默检测模块，无需手动重装，一键更新包直接投递至桌面。
+Pyrus 并非套壳浏览器的“又一个 Markdown 阅读器”，而是从底层构建的性能怪兽与美学引擎：
+
+- ⚡️ **Rust 毫秒级极速全量检索**：底层搭载 `ignore` 与 `rayon` 多核并发引擎。不管你的知识库有几千还是上万篇文档，哪怕 10 毫秒内，也能瞬间撕裂并检索出带有上下文快照的匹配结果。
+- 🔗 **原生系统级文件接管 (OS Integration)**：已深度植入操作系统。支持右键 `打开方式 -> Pyrus`。双击电脑任意 `.md` 文件，瞬间拉起软件并在屏幕中央绝美排版。
+- 💅 **出版级美学排版 (Typography Engine)**：内置极具质感的 `Glassmorphism` (毛玻璃) 交互系统，并开箱即用内置了**「霞鹜文楷 (LXGW WenKai)」**与**「Fira Code」**神仙字体。即使不安装任何字体，也能获得极致阅读享受。
+- 📉 **反 Electron 的极限内存**：完全由原生 Rust 🦀 与 Tauri v2 底层驱动。包体积不到 10MB，常驻内存极低，再也不用忍受开启文档时电脑风扇的轰鸣。
+- 🗂️ **双核无缝导航**：独创选项卡交互逻辑，单击鼠标即可在**“全库文件目录”**与**“当前文章大纲 (TOC)”**之间来回丝滑切换。
+- 🔄 **毫秒级热更感知**：完美配合 VS Code / Obsidian / Typora。当你用其他软件保存文档，Pyrus 借助系统底层监听实现 100 毫秒级无感热刷新，打造终极“第二屏双屏利器”。
 
 ## 📥 下载安装
 
@@ -34,18 +36,46 @@
 - **微软 Windows 用户**: 下载 `.exe` 文件
 - **Linux 发行版系统**: 下载 `.deb` 或是 `.AppImage`
 
+## 💖 支持与打赏 (Sponsor)
+
+Pyrus 是一款用极客精神打造的独立开源产品。如果你觉得这个项目为你带来了优雅的阅读体验，或者提升了你的工作效率，欢迎请我喝杯咖啡！你的支持是我持续迭代这款“最美阅读器”的绝对动力。
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><strong>☕ Buy Me A Coffee</strong></td>
+      <td align="center"><strong>🟢 微信支付 (WeChat Pay)</strong></td>
+      <td align="center"><strong>🔵 支付宝 (AliPay)</strong></td>
+    </tr>
+    <tr>
+      <td align="center">
+        <!-- 替换为你自己的 Buy Me A Coffee 链接 -->
+        <a href="https://www.buymeacoffee.com/YOUR_USERNAME" target="_blank">
+          <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+        </a>
+      </td>
+      <td align="center">
+        <!-- 替换为你自己的微信收款码 URL -->
+        <img src="https://via.placeholder.com/200x200.png?text=WeChat+Pay+QR" width="200" alt="WeChat Pay">
+      </td>
+      <td align="center">
+        <!-- 替换为你自己的支付宝收款码 URL -->
+        <img src="https://via.placeholder.com/200x200.png?text=AliPay+QR" width="200" alt="AliPay">
+      </td>
+    </tr>
+  </table>
+</div>
+
 ## 🛠️ 本地开发者指南
 
 本项目是一套前后端高度分离的高性能架构框架。
 
 ### 运行环境要求
-
 - Node.js (推荐 v24 LTS 版本)
 - Rust (稳定版工具链)
 - 对应底层操作系统的基础编译包依赖 (Windows 需 C++, Mac 需 Xcode 命令行)
 
 ### 唤醒本地开发服
-
 ```bash
 # 克隆全量代码
 git clone https://github.com/Insight4Core/markdown_reader.git
@@ -58,18 +88,10 @@ npm install
 npm run tauri dev
 ```
 
-### 全自动构建发版流程
-
-在这个强大的工作流中，作为库的主人，你只需要执行打包触发指令：
-```bash
-# 自动提升小版本、打下 Git 标签并向 Github 云端抛出构建流水线！
-npm run release:patch
-```
-
 ## 📝 反馈与代码贡献
 
 如果你在软件使用中邂逅了 Bug 或是脑海里有更多牛皮的脑洞功能规划，欢迎随时在 Github 开启一个 Issue 或向我递交 PR！
 
 ---
 
-> Crafted by [Insight4Core](https://github.com/Insight4Core)
+> Crafted with ❤️ by [Insight4Core](https://github.com/Insight4Core)

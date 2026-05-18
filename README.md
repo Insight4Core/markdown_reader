@@ -18,14 +18,16 @@
 
 <br />
 
-## ✨ Features
+## ✨ Core Features (Unfair Advantages)
 
-- ⚡️ **Blazing Fast**: Powered by Rust 🦀 and Tauri v2 for native desktop performance.
-- 🗂️ **Knowledge Base Mode**: Select any local directory to deeply scan and manage your `.md` files in a seamless tree.
-- 📑 **Dual-Tab Navigation**: Smoothly switch between your local **File Library** and the **Table of Contents (TOC)** of the current document with a single click.
-- 🎨 **Rich Formatting Support**: Full parsing support for core elements, Mermaid diagrams, Katex Math, Task Lists, GitHub alerts, Footnotes, Emojis, and more.
-- 🔄 **Live Watch**: Automatically detects file changes in your markdown via OS-level file watching, updating the preview instantly without saving.
-- ☁️ **Built-in Auto Update**: Cross-platform auto-updater embedded. You will be notified the second a new release drops.
+Pyrus is not just "another Markdown reader in a browser shell." It's a performance beast and aesthetic engine built from the ground up:
+
+- ⚡️ **Rust-Powered Lightning Full-Text Search**: Driven by the `ignore` and `rayon` crates. Whether your knowledge base has thousands or tens of thousands of documents, Pyrus can instantly tear through and retrieve text-matching snippets with precise line numbers in under 10 milliseconds.
+- 🔗 **Deep OS Integration (Open With)**: Fully integrated into your operating system. Right-click any `.md` file on your computer and open it with Pyrus to instantly launch the app and render your document beautifully in the center of your screen.
+- 💅 **Publisher-Grade Typography Engine**: Features a premium `Glassmorphism` UI system and comes pre-bundled with god-tier fonts out-of-the-box, including **"LXGW WenKai"** and **"Fira Code"**. Enjoy the ultimate reading experience without installing any extra fonts.
+- 📉 **Anti-Electron Memory Footprint**: Completely powered by native Rust 🦀 and Tauri v2. The package size is under 10MB, and the background memory footprint is incredibly low. Say goodbye to your laptop fans spinning up just to read a document.
+- 🗂️ **Dual-Tab Seamless Navigation**: A unique tabbed interaction logic allows you to switch between your **"Full Library Directory"** and the **"Table of Contents (TOC)"** of the current document with a single click.
+- 🔄 **Millisecond Live Reload**: Perfectly complements VS Code, Obsidian, or Typora. As you save documents in other editors, Pyrus leverages OS-level file system watching to achieve a 100-millisecond invisible hot-refresh, making it the ultimate "second-screen companion."
 
 ## 📥 Download & Install
 
@@ -33,6 +35,36 @@ Head over to the [Releases](https://github.com/Insight4Core/markdown_reader/rele
 - **macOS**: Download `.dmg`
 - **Windows**: Download `.exe`
 - **Linux**: Download `.deb` or `.AppImage`
+
+## 💖 Support & Sponsor
+
+Pyrus is an independent, open-source product crafted with a hacker spirit. If you feel this project has brought you an elegant reading experience or improved your workflow, consider buying me a coffee! Your support is the absolute driving force for me to continuously iterate on this "most beautiful reader."
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><strong>☕ Buy Me A Coffee</strong></td>
+      <td align="center"><strong>🟢 WeChat Pay</strong></td>
+      <td align="center"><strong>🔵 AliPay</strong></td>
+    </tr>
+    <tr>
+      <td align="center">
+        <!-- Replace with your Buy Me A Coffee link -->
+        <a href="https://www.buymeacoffee.com/YOUR_USERNAME" target="_blank">
+          <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+        </a>
+      </td>
+      <td align="center">
+        <!-- Replace with your WeChat Pay QR Code URL -->
+        <img src="https://via.placeholder.com/200x200.png?text=WeChat+Pay+QR" width="200" alt="WeChat Pay">
+      </td>
+      <td align="center">
+        <!-- Replace with your AliPay QR Code URL -->
+        <img src="https://via.placeholder.com/200x200.png?text=AliPay+QR" width="200" alt="AliPay">
+      </td>
+    </tr>
+  </table>
+</div>
 
 ## 🛠️ Development
 
@@ -58,17 +90,10 @@ npm install
 npm run tauri dev
 ```
 
-### Build & Release
-
-We use a fully automated release pipeline. If you want to build locally:
-```bash
-npm run tauri build
-```
-
 ## 📝 Roadmap & Contributing
 
 If you found a bug or have a feature request, please feel free to open an issue or submit a PR! Contributions are always welcome.
 
 ---
 
-> Crafted by [Insight4Core](https://github.com/Insight4Core)
+> Crafted with ❤️ by [Insight4Core](https://github.com/Insight4Core)
