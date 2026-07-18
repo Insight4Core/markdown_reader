@@ -450,24 +450,24 @@
     
     <div class="sidebar-content">
       {#if sidebarTab === 'files'}
-        <div style="padding: 10px 15px; border-bottom: 1px solid rgba(125,125,125,0.1);">
+        <div class="sidebar-search">
           <input type="text" bind:value={searchQuery} placeholder={t('sidebar.search_placeholder')} class="search-input" />
         </div>
         <ul style="margin:0; padding:0; list-style: none;">
           {#if searchQuery.trim() !== ''}
              {#if isSearching}
-               <li style="padding: 10px 22px; color: #666; font-size: 13px;">Searching full text...</li>
+               <li class="sidebar-empty">Searching full text...</li>
              {:else if searchResults.length === 0}
-               <li style="padding: 10px 22px; color: #666; font-size: 13px;">No matching text found.</li>
+               <li class="sidebar-empty">No matching text found.</li>
              {:else}
                {#each searchResults as res}
                  <!-- svelte-ignore a11y_click_events_have_key_events -->
                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                 <li class="search-item {filePath === res.file_path ? 'active-file' : ''}" style="padding: 10px 15px; border-bottom: 1px solid rgba(125,125,125,0.1); cursor: pointer;" onclick={(e) => { e.stopPropagation(); openSpecificFile(res.file_path); }}>
-                   <div style="font-weight: 500; font-size: 13px; color: rgba(0, 122, 204, 0.9); margin-bottom: 4px;">
-                     📝 {res.file_name} <span style="font-size: 11px; color: #888; font-weight: normal; margin-left: 4px;">(L{res.line_number})</span>
+                 <li class="search-item {filePath === res.file_path ? 'active-file' : ''}" onclick={(e) => { e.stopPropagation(); openSpecificFile(res.file_path); }}>
+                   <div class="search-item__title">
+                     <span>✦ {res.file_name}</span><span class="search-item__line">L{res.line_number}</span>
                    </div>
-                   <div style="font-size: 12px; color: var(--color-text-gray, #666); line-height: 1.4; word-break: break-all; opacity: 0.8; font-family: monospace;">
+                   <div class="search-item__snippet">
                      {res.snippet}
                    </div>
                  </li>
@@ -475,15 +475,15 @@
              {/if}
           {:else}
              {#if visibleTreeFiles.length === 0}
-                <li style="padding: 10px 22px; color: #666; font-size: 13px;">{t('sidebar.no_md_match')}</li>
+                <li class="sidebar-empty">{t('sidebar.no_md_match')}</li>
              {:else}
                 {#each visibleTreeFiles as f}
                   {#if f.isDir}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <li class="folder-item" style="padding-left: {10 + (f.depth - 1) * 12}px; font-weight: bold; color: rgba(0, 122, 204, 0.8); cursor: pointer; padding-top: 8px; padding-bottom: 4px; user-select: none;" onclick={() => toggleFolder(f.path)}>
-                      <span class="file-icon" style="display:inline-block; width:16px; margin-right: 4px;">{collapsedFolders.has(f.path) ? '▶' : '▼'}</span>
-                      <span class="file-icon">📁</span>
+                    <li class="folder-item" style="padding-left: {16 + (f.depth - 1) * 12}px" onclick={() => toggleFolder(f.path)}>
+                      <span class="folder-arrow">{collapsedFolders.has(f.path) ? '›' : '⌄'}</span>
+                      <span class="file-icon">▣</span>
                       <span class="file-name" title={f.name}>{f.name}</span>
                     </li>
                   {:else}
@@ -501,7 +501,7 @@
       {:else}
         <ul style="margin:0; padding:0;">
           {#if headers.length === 0}
-            <li style="padding: 10px 22px; color: #666;">{t('sidebar.no_toc')}</li>
+            <li class="sidebar-empty">{t('sidebar.no_toc')}</li>
           {:else}
             {#each headers as h}
               <li class="md-reader__side-h{h.level}">
@@ -522,10 +522,17 @@
 
   <div class="md-reader__body">
     {#if !filePath}
-      <div style="display:flex; flex-direction:column; justify-content:center; align-items:center; height: 100vh; color: #888; font-family: system-ui; text-align: center;">
-        <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.8;">📚</div>
-        <h2 style="color: rgba(0, 122, 204, 0.8); margin-bottom: 10px; font-weight: 500;">{t('welcome.title')}</h2>
-        <p style="font-size: 14px; margin-bottom: 24px;">{t('welcome.subtitle')}</p>
+      <div class="welcome">
+        <div class="welcome__orb welcome__orb--one"></div>
+        <div class="welcome__orb welcome__orb--two"></div>
+        <div class="welcome__mark"><span>✦</span></div>
+        <p class="welcome__eyebrow">PYRUS / READING SPACE</p>
+        <h2>{t('welcome.title')}</h2>
+        <p class="welcome__subtitle">{t('welcome.subtitle')}</p>
+        <div class="welcome__actions">
+          <button class="welcome__primary" onclick={openFile}>{t('settings.open_file')}</button>
+          <button class="welcome__secondary" onclick={openFolder}>{t('settings.open_folder')}</button>
+        </div>
       </div>
     {:else}
       <div class="md-reader__markdown-content centered" onclick={handleMarkdownClick}>
@@ -535,19 +542,21 @@
   </div>
 </div>
 
-<button class="md-reader__btn floating-gear glass" onclick={() => drawerOpen = !drawerOpen} style="position:fixed; bottom: 30px; right: 30px; z-index:100; display:flex; justify-content:center; align-items:center;">
-  ⚙️
+<button class="md-reader__btn floating-gear" onclick={() => drawerOpen = !drawerOpen} aria-label={t('settings.title')}>
+  <span>⚙</span>
 </button>
 
 {#if drawerOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="drawer-overlay" onclick={() => drawerOpen = false} style="position:fixed; top:0; left:0; width:100%; height:100%; z-index:80; background: transparent;"></div>
-<div class="drawer glass">
-  <h3>{t('settings.title')}</h3>
-  <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
-  <button onclick={openFolder} class="btn-primary" style="background:#2ea44f;">{t('settings.open_folder')}</button>
-  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+<div class="drawer-overlay" onclick={() => drawerOpen = false}></div>
+<div class="drawer">
+  <div class="drawer__heading"><p>PYRUS</p><h3>{t('settings.title')}</h3></div>
+  <div class="drawer__actions">
+    <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
+    <button onclick={openFolder} class="btn-secondary">{t('settings.open_folder')}</button>
+  </div>
+  <hr/>
   
   <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
     <div style="display:flex; justify-content:space-between;">
@@ -559,7 +568,7 @@
     </div>
   </div>
 
-  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  <hr/>
 
   <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
     <div style="display:flex; justify-content:space-between;">
@@ -590,26 +599,26 @@
     {/if}
   </div>
 
-  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  <hr/>
   
-  <button onclick={() => checkUpdate(true)} class="btn-primary" style="background:#58a6ff;" disabled={isCheckingUpdate}>
+  <button onclick={() => checkUpdate(true)} class="btn-secondary" disabled={isCheckingUpdate}>
     {isCheckingUpdate ? t('update.checking') : t('update.check_btn')}
   </button>
 
-  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  <hr/>
 
   <div style="display:flex; flex-direction:column; gap:5px; font-size:14px;">
     <div style="display:flex; justify-content:space-between;">
        <label>{t('settings.scan_depth')}: <b>{maxDepth} {t('settings.layers')}</b></label>
        {#if folderPath}
-         <span style="color:#007acc; cursor:pointer;" onclick={refreshFolder}>{t('settings.refresh')}</span>
+         <button class="text-button" onclick={refreshFolder}>{t('settings.refresh')}</button>
        {/if}
     </div>
     <input type="range" bind:value={maxDepth} min="1" max="5" style="width:100%" onchange={refreshFolder} />
     <span style="font-size: 12px; color:#888;">{t('settings.depth_hint')}</span>
   </div>
 
-  <hr style="border:0; border-top:1px solid rgba(125,125,125,0.2)"/>
+  <hr/>
   <label><input type="checkbox" bind:checked={showSidebar} /> {t('settings.toggle_sidebar')}</label>
 </div>
 {/if}
@@ -619,22 +628,50 @@
     position: fixed;
     top: 0;
     right: 0;
-    width: 320px;
+    width: min(360px, 100vw);
     height: 100vh;
-    box-shadow: -4px 0 24px rgba(0,0,0,0.1);
+    box-shadow: -18px 0 50px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
     z-index: 90;
-    padding: 40px 20px;
+    padding: 36px 28px;
     display: flex;
     flex-direction: column;
-    gap: 15px;
+    gap: 18px;
     animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    background: color-mix(in srgb, var(--color-side-bg) 92%, transparent);
+    border-left: 1px solid var(--color-side-border);
+    backdrop-filter: blur(28px) saturate(140%);
+    -webkit-backdrop-filter: blur(28px) saturate(140%);
   }
-  .glass {
-    background: var(--color-modal-bg, rgba(255, 255, 255, 0.8));
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
-    border-left: 1px solid var(--color-border);
+  .drawer__heading p, .welcome__eyebrow {
+    margin: 0 0 8px;
+    color: var(--color-primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .16em;
   }
+  .drawer__heading h3 { margin: 0; color: var(--color-text-primary); font-size: 25px; letter-spacing: -.04em; }
+  .drawer__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .drawer hr { width: 100%; margin: 2px 0; border: 0; border-top: 1px solid var(--color-side-border); }
+  .drawer select, .drawer input[type='text'] {
+    border: 1px solid var(--color-border) !important;
+    border-radius: 8px !important;
+    color: var(--color-text-primary);
+    background: var(--color-bg) !important;
+  }
+  .drawer label { color: var(--color-text-secondary); }
+  .btn-primary, .btn-secondary {
+    min-height: 42px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+  }
+  .btn-primary { border: 1px solid var(--color-primary); background: var(--color-primary); color: var(--color-white); }
+  .btn-secondary { border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-primary); }
+  .btn-primary:hover, .btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 8px 18px color-mix(in srgb, var(--color-primary) 16%, transparent); }
+  .text-button { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+  .drawer-overlay { position: fixed; inset: 0; z-index: 80; background: color-mix(in srgb, var(--color-text-primary) 4%, transparent); backdrop-filter: blur(2px); }
   
   .sidebar-resizer {
     position: absolute;
@@ -650,59 +687,54 @@
     background: rgba(0, 122, 204, 0.3);
   }
   
-  /* Sidebar Tabs */
-  @media (prefers-color-scheme: dark) {
-    .glass { background: rgba(30, 30, 30, 0.8); border: 1px solid rgba(100,100,100,0.3); }
-  }
-  .btn-primary {
-    background: #007acc; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: 500;
-  }
   @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
-  .floating-gear { cursor: pointer; width: 40px; height: 40px; border-radius: 20px; }
-  .floating-gear:hover { transform: scale(1.05) !important; transition: transform 0.2s; }
+  .floating-gear { position: fixed; right: 28px; bottom: 28px; z-index: 100; display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-side-bg); color: var(--color-text-primary); box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
+  .floating-gear span { font-size: 20px; transition: transform .35s ease; }
+  .floating-gear:hover span { transform: rotate(55deg); }
   
   /* Sidebar Tabs */
   .sidebar-tabs {
     display: flex;
-    border-bottom: 1px solid rgba(125,125,125,0.2);
+    margin: 0 14px;
+    padding: 5px;
+    border: 1px solid var(--color-side-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-bg) 60%, transparent);
   }
   .sidebar-tabs button {
     flex: 1;
     background: transparent;
     border: none;
-    padding: 12px 0;
-    font-size: 14px;
-    font-weight: bold;
-    color: #666;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-gray);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: all 0.2s;
-  }
-  @media (prefers-color-scheme: dark) {
-      .sidebar-tabs button { color: #aaa; }
+    border-radius: 8px;
+    transition: all .2s;
   }
   .sidebar-tabs button.active {
-    border-bottom: 2px solid #007acc;
-    color: #007acc;
+    color: var(--color-primary);
+    background: var(--color-primary-alpha-10);
   }
   .sidebar-tabs button:hover {
-    background: rgba(125,125,125,0.05);
+    color: var(--color-text-primary);
+    background: color-mix(in srgb, var(--color-primary-alpha-10) 45%, transparent);
   }
   
   /* Sidebar Content lists */
   .search-input {
     width: 100%;
     padding: 6px 12px;
-    border: 1px solid rgba(125,125,125,0.3);
-    border-radius: 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
     outline: none;
     font-size: 12px;
-    background: rgba(255, 255, 255, 0.5);
+    color: var(--color-text-primary);
+    background: color-mix(in srgb, var(--color-bg) 72%, transparent);
   }
-  @media (prefers-color-scheme: dark) {
-     .search-input { background: rgba(0, 0, 0, 0.2); color: #ddd; }
-  }
-  .search-input:focus { border-color: #007acc; }
+  .search-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-alpha-10); }
+  .sidebar-search { padding: 18px 16px 12px; }
 
   .sidebar-content {
     flex: 1;
@@ -711,26 +743,25 @@
     overscroll-behavior: contain;
   }
   .file-item {
-    padding: 8px 15px;
+    margin: 2px 8px;
+    padding: 9px 10px;
     cursor: pointer;
     font-size: 13px;
     display: flex;
     align-items: center;
     gap: 8px;
     border-left: 2px solid transparent;
-    color: #444;
+    border-radius: 8px;
+    color: var(--color-text-secondary);
     transition: all 0.15s;
   }
-  @media (prefers-color-scheme: dark) {
-      .file-item { color: #ddd; }
-  }
   .file-item:hover {
-    background: rgba(125,125,125,0.08);
+    background: var(--color-primary-alpha-10);
   }
   .file-item.active-file {
-    background: rgba(0, 122, 204, 0.1);
-    border-left: 2px solid #007acc;
-    color: #007acc;
+    background: var(--color-primary-alpha-10);
+    border-left-color: var(--color-primary);
+    color: var(--color-primary);
     font-weight: 500;
   }
   .file-icon { font-size: 12px; }
@@ -740,4 +771,26 @@
     white-space: nowrap;
     flex: 1;
   }
+  .folder-item { display: flex; align-items: center; gap: 6px; padding-top: 10px; padding-bottom: 5px; color: var(--color-primary); font-size: 12px; font-weight: 700; cursor: pointer; user-select: none; }
+  .folder-arrow { width: 10px; color: var(--color-text-gray); font-size: 16px; line-height: 1; }
+  .sidebar-empty { padding: 18px 22px; color: var(--color-text-gray); font-size: 12px; }
+  .search-item { padding: 12px 16px; border-bottom: 1px solid var(--color-side-border); cursor: pointer; transition: background .15s ease; }
+  .search-item:hover { background: var(--color-primary-alpha-10); }
+  .search-item__title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
+  .search-item__line { color: var(--color-text-gray); font-size: 10px; font-weight: 500; }
+  .search-item__snippet { color: var(--color-text-gray); font: 11px/1.5 var(--font-family-code); word-break: break-word; }
+  .welcome { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 32px; overflow: hidden; text-align: center; color: var(--color-text-primary); }
+  .welcome__orb { position: absolute; z-index: -1; border-radius: 999px; filter: blur(4px); opacity: .8; }
+  .welcome__orb--one { width: 360px; height: 360px; top: 9%; left: 11%; background: var(--color-primary-alpha-10); }
+  .welcome__orb--two { width: 270px; height: 270px; right: 10%; bottom: 12%; background: var(--color-important-alpha-10); }
+  .welcome__mark { display: grid; place-items: center; width: 72px; height: 72px; margin-bottom: 25px; border: 1px solid color-mix(in srgb, var(--color-primary) 35%, var(--color-border)); border-radius: 23px; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 70%, var(--color-bg)); box-shadow: 0 18px 40px color-mix(in srgb, var(--color-primary) 13%, transparent); transform: rotate(-8deg); }
+  .welcome__mark span { font-size: 31px; transform: rotate(8deg); }
+  .welcome h2 { max-width: 680px; margin: 0; color: var(--color-text-primary); font-size: clamp(30px, 5vw, 54px); letter-spacing: -.06em; line-height: 1.06; }
+  .welcome__subtitle { max-width: 450px; margin: 16px 0 27px; color: var(--color-text-secondary); font-size: 14px; }
+  .welcome__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .welcome__primary, .welcome__secondary { padding: 11px 16px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 600; transition: transform .18s ease, box-shadow .18s ease; }
+  .welcome__primary { border: 1px solid var(--color-primary); color: var(--color-white); background: var(--color-primary); box-shadow: 0 10px 20px color-mix(in srgb, var(--color-primary) 22%, transparent); }
+  .welcome__secondary { border: 1px solid var(--color-border); color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg) 80%, transparent); }
+  .welcome__primary:hover, .welcome__secondary:hover { transform: translateY(-2px); }
+  @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .floating-gear { right: 18px; bottom: 18px; } }
 </style>
