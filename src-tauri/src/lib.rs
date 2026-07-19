@@ -119,16 +119,26 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            use tauri::Emitter;
-            if let tauri::RunEvent::Opened { urls } = event {
-                if let Some(url) = urls.first() {
-                    let path = url.path().to_string();
-                    let app_h = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                        let _ = app_h.emit("sys-open-file", path);
-                    });
+            // `RunEvent::Opened` is only exposed by Tauri on macOS. Other
+            // desktop platforms receive file paths through launch arguments,
+            // which are handled in `setup` above.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Emitter;
+
+                if let tauri::RunEvent::Opened { urls } = event {
+                    if let Some(url) = urls.first() {
+                        let path = url.path().to_string();
+                        let app_h = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                            let _ = app_h.emit("sys-open-file", path);
+                        });
+                    }
                 }
             }
+
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app_handle, event);
         });
 }
