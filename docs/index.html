@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Pyrus is a calm, local-first reading space for your Markdown knowledge base." />
+    <title>Pyrus — Your local reading space</title>
+    <style>
+      :root { --ink: #27334a; --muted: #71809a; --line: #dde4f0; --paper: #f9fbff; --blue: #6685df; --blue-soft: #eef2ff; --lilac: #f2efff; --shadow: 0 26px 70px rgba(49, 72, 125, .12); }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; color: var(--ink); background: var(--paper); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+      a { color: inherit; text-decoration: none; }
+      .shell { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+      .nav { display: flex; align-items: center; justify-content: space-between; padding: 24px 0; }
+      .brand { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 750; letter-spacing: -.02em; }
+      .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid #cbd6f4; border-radius: 10px; color: var(--blue); background: var(--blue-soft); }
+      .nav-actions { display: flex; align-items: center; gap: 12px; }
+      .language { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: rgba(255,255,255,.65); cursor: pointer; font: inherit; font-size: 12px; }
+      .github { color: var(--muted); font-size: 12px; font-weight: 650; }
+      .hero { position: relative; display: grid; grid-template-columns: .95fr 1.05fr; align-items: center; min-height: 610px; gap: 70px; overflow: hidden; }
+      .hero::before, .hero::after { position: absolute; z-index: -1; border-radius: 50%; content: ""; filter: blur(1px); }
+      .hero::before { width: 460px; height: 460px; top: 40px; left: -210px; background: #e9efff; }
+      .hero::after { width: 340px; height: 340px; right: -100px; bottom: 30px; background: var(--lilac); }
+      .eyebrow { margin: 0 0 16px; color: var(--blue); font-size: 11px; font-weight: 750; letter-spacing: .16em; }
+      h1 { max-width: 510px; margin: 0; font-size: clamp(43px, 6vw, 72px); line-height: .98; letter-spacing: -.065em; }
+      .lead { max-width: 430px; margin: 24px 0 30px; color: var(--muted); font-size: 17px; line-height: 1.65; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+      .button { display: inline-flex; align-items: center; justify-content: center; min-height: 45px; padding: 0 18px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.8); font-size: 13px; font-weight: 700; transition: transform .18s ease, box-shadow .18s ease; }
+      .button:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(56, 82, 148, .15); }
+      .button.primary { border-color: var(--blue); color: white; background: var(--blue); box-shadow: 0 10px 22px rgba(102,133,223,.26); }
+      .note { margin: 15px 0 0; color: var(--muted); font-size: 11px; }
+      .product-shot { position: relative; padding: 12px; border: 1px solid rgba(211,221,242,.9); border-radius: 22px; background: rgba(255,255,255,.62); box-shadow: var(--shadow); transform: rotate(2.5deg); backdrop-filter: blur(10px); }
+      .product-shot img { display: block; width: 100%; border: 1px solid #edf0f8; border-radius: 13px; }
+      .floating-card { position: absolute; right: -24px; bottom: -18px; padding: 14px 16px; border: 1px solid #dbe3f6; border-radius: 13px; color: var(--ink); background: rgba(255,255,255,.9); box-shadow: 0 16px 38px rgba(49,72,125,.14); font-size: 11px; line-height: 1.45; transform: rotate(-4deg); }
+      .floating-card span { display: block; margin-bottom: 3px; color: var(--blue); font-weight: 750; letter-spacing: .08em; }
+      .section { padding: 105px 0; }
+      .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 34px; }
+      h2 { margin: 0; font-size: clamp(29px, 4vw, 45px); letter-spacing: -.055em; line-height: 1.05; }
+      .section-heading p { max-width: 345px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+      .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .feature { min-height: 210px; padding: 22px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255,255,255,.64); }
+      .feature-mark { display: grid; width: 35px; height: 35px; place-items: center; margin-bottom: 37px; border-radius: 10px; color: var(--blue); background: var(--blue-soft); font-size: 16px; }
+      .feature h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: -.02em; }
+      .feature p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+      .gallery { display: grid; grid-template-columns: 1.16fr .84fr; gap: 16px; }
+      .gallery figure { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: white; box-shadow: 0 15px 42px rgba(49,72,125,.06); }
+      .gallery img { display: block; width: 100%; }
+      .gallery figcaption { padding: 13px 15px; color: var(--muted); font-size: 12px; }
+      .gallery aside { display: grid; gap: 16px; }
+      .promise { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; padding: 25px; border: 1px solid #d5def7; border-radius: 18px; background: linear-gradient(120deg, #eff3ff, #fbfaff); }
+      .promise-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; color: var(--blue); background: white; box-shadow: 0 8px 20px rgba(69,96,163,.12); font-size: 19px; }
+      .promise h3 { margin: 0 0 4px; font-size: 16px; }
+      .promise p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .closing { padding: 112px 0; text-align: center; }
+      .closing h2 { max-width: 620px; margin: 0 auto 18px; }
+      .closing p { max-width: 450px; margin: 0 auto 24px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+      .footer { display: flex; justify-content: space-between; padding: 24px 0 34px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+      [lang="zh"] { display: none; }
+      body.zh [lang="en"] { display: none; }
+      body.zh [lang="zh"] { display: initial; }
+      @media (max-width: 760px) { .shell { width: min(100% - 28px, 560px); } .github { display: none; } .hero { grid-template-columns: 1fr; gap: 42px; min-height: auto; padding: 70px 0 85px; } .product-shot { width: 94%; margin: 0 auto; transform: none; } .floating-card { right: -8px; } .section { padding: 70px 0; } .section-heading { display: block; } .section-heading p { margin-top: 14px; } .features, .gallery { grid-template-columns: 1fr; } .feature { min-height: 175px; } .feature-mark { margin-bottom: 25px; } .footer { flex-direction: column; gap: 8px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="shell nav">
+        <a class="brand" href="#top" aria-label="Pyrus home"><span class="brand-mark">✦</span>Pyrus</a>
+        <div class="nav-actions"><a class="github" href="https://github.com/Insight4Core/markdown_reader">GitHub ↗</a><button class="language" id="language-toggle" type="button">中文</button></div>
+      </div>
+
+      <section class="shell hero" id="top">
+        <div>
+          <p class="eyebrow" lang="en">YOUR LOCAL READING SPACE</p><p class="eyebrow" lang="zh">你的本地阅读空间</p>
+          <h1 lang="en">A calmer home for your Markdown knowledge.</h1><h1 lang="zh">给你的 Markdown 知识，一个更安静的家。</h1>
+          <p class="lead" lang="en">Pyrus helps you return to what matters, continue where you stopped, and find any note without sending your knowledge anywhere.</p><p class="lead" lang="zh">Pyrus 帮你回到重要内容、从上次停下的地方继续，并在不上传任何知识的前提下找回每一篇笔记。</p>
+          <div class="actions"><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="en">Download Early Access</a><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="zh">下载 Early Access</a><a class="button" href="#features" lang="en">See how it works</a><a class="button" href="#features" lang="zh">看看它如何工作</a></div>
+          <p class="note" lang="en">Free during Early Access · No account · Local-first</p><p class="note" lang="zh">Early Access 阶段免费 · 无账户 · 本地优先</p>
+        </div>
+        <div class="product-shot"><img lang="en" src="./screenshots/new-knowledge-base-en.png" alt="Create a Pyrus knowledge base" /><img lang="zh" src="./screenshots/welcome.png" alt="Pyrus 欢迎页" /><div class="floating-card"><span lang="en">LOCAL-FIRST</span><span lang="zh">本地优先</span><b lang="en">Your notes stay yours.</b><b lang="zh">你的笔记，始终属于你。</b></div></div>
+      </section>
+
+      <section class="shell section" id="features">
+        <div class="section-heading"><h2 lang="en">Built for returning to knowledge.</h2><h2 lang="zh">为重新回到知识而设计。</h2><p lang="en">Pyrus stays focused on the reading loop: open, find, read, and naturally continue.</p><p lang="zh">Pyrus 专注于阅读闭环：打开、找回、阅读，然后自然地继续。</p></div>
+        <div class="features">
+          <article class="feature"><div class="feature-mark">↳</div><h3 lang="en">Continue reading</h3><h3 lang="zh">继续阅读</h3><p lang="en">Every document remembers where you stopped, then brings you back with a quiet progress cue.</p><p lang="zh">每篇文档都会记住你的阅读位置，并用轻量的进度提示带你回到那里。</p></article>
+          <article class="feature"><div class="feature-mark">⌘</div><h3 lang="en">Find anything</h3><h3 lang="zh">随时找回</h3><p lang="en">Press ⌘K to search file names and content, then jump straight to the matching passage.</p><p lang="zh">按下 ⌘K 搜索文件名和正文，并直接跳到匹配段落。</p></article>
+          <article class="feature"><div class="feature-mark">✦</div><h3 lang="en">Keep what matters close</h3><h3 lang="zh">让重要内容近在手边</h3><p lang="en">Pin essential notes and keep your knowledge home intentional, not crowded.</p><p lang="zh">固定关键笔记，让你的知识库首页始终清晰而不拥挤。</p></article>
+        </div>
+      </section>
+
+      <section class="shell section"><div class="section-heading"><h2 lang="en">A small interface with a clear point of view.</h2><h2 lang="zh">一个小而有明确观点的界面。</h2><p lang="en">Nothing to configure before you can start reading.</p><p lang="zh">不必配置一堆选项，就可以开始阅读。</p></div><div class="gallery"><figure><img lang="en" src="./screenshots/global-search-en.png" alt="Pyrus global search" /><img lang="zh" src="./screenshots/global-search.png" alt="Pyrus 全局搜索" /><figcaption lang="en">Global search, ready whenever you are.</figcaption><figcaption lang="zh">全局搜索，在你需要时随时出现。</figcaption></figure><aside><figure><img lang="en" src="./screenshots/reading-en.png" alt="Pyrus reading experience" /><img lang="zh" src="./screenshots/reading.png" alt="Pyrus 阅读体验" /><figcaption lang="en">A live outline keeps long-form reading grounded.</figcaption><figcaption lang="zh">实时大纲让长文阅读始终有方向。</figcaption></figure><figure><img lang="en" src="./screenshots/preferences-en.png" alt="Pyrus preferences" /><img lang="zh" src="./screenshots/preferences.png" alt="Pyrus 偏好设置" /><figcaption lang="en">Preferences without the clutter.</figcaption><figcaption lang="zh">清爽而不复杂的偏好设置。</figcaption></figure></aside></div></section>
+
+      <section class="shell promise"><div class="promise-mark">⌂</div><div><h3 lang="en">Your notes stay on your device.</h3><h3 lang="zh">你的笔记始终留在设备上。</h3><p lang="en">Pyrus does not require an account or cloud sync. Your Markdown files remain ordinary files in folders you control.</p><p lang="zh">Pyrus 不要求账户或云同步。你的 Markdown 始终是你自己掌控的普通文件。</p></div></section>
+
+      <section class="shell closing"><h2 lang="en">Try the reading space your notes deserve.</h2><h2 lang="zh">试试你的笔记值得拥有的阅读空间。</h2><p lang="en">Pyrus is free during Early Access. Your feedback will shape what it becomes next.</p><p lang="zh">Pyrus 在 Early Access 阶段免费。你的反馈会决定它接下来成为怎样的产品。</p><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="en">Download Pyrus</a><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="zh">下载 Pyrus</a></section>
+    </main>
+    <footer class="shell footer"><span>© 2026 Insight4Core</span><a href="https://github.com/Insight4Core/markdown_reader/issues" lang="en">Send feedback ↗</a><a href="https://github.com/Insight4Core/markdown_reader/issues" lang="zh">发送反馈 ↗</a></footer>
+    <script>
+      const toggle = document.getElementById('language-toggle');
+      toggle.addEventListener('click', () => { document.body.classList.toggle('zh'); const chinese = document.body.classList.contains('zh'); document.documentElement.lang = chinese ? 'zh-CN' : 'en'; document.title = chinese ? 'Pyrus — 你的本地阅读空间' : 'Pyrus — Your local reading space'; toggle.textContent = chinese ? 'EN' : '中文'; });
+    </script>
+  </body>
+</html>
