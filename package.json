@@ -1,6 +1,6 @@
 {
   "name": "pyrus",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Pyrus - Knowledge Base Platform",
   "type": "module",
   "scripts": {
