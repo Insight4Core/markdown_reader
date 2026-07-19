@@ -9,6 +9,8 @@
 
 Pyrus is free while it grows. It is built for people who already keep notes in Markdown and want a more focused place to read, revisit, and find them—without accounts, cloud sync, or an editor getting in the way.
 
+![Pyrus welcome screen](./docs/screenshots/welcome.png)
+
 ## What makes it useful
 
 - **Local knowledge spaces** — Open an existing folder or create a new knowledge base with a ready-to-read `Welcome.md`.

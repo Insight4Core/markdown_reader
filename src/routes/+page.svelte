@@ -28,6 +28,7 @@
       }
     });
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
+    document.addEventListener('click', handleMarkdownClick);
     const handleGlobalShortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
@@ -38,6 +39,7 @@
     window.addEventListener('keydown', handleGlobalShortcut);
     return () => {
       window.removeEventListener('scroll', saveReadingProgress);
+      document.removeEventListener('click', handleMarkdownClick);
       window.removeEventListener('keydown', handleGlobalShortcut);
       unlistenPromise.then(unlisten => unlisten());
     };
@@ -80,7 +82,7 @@
   let globalSearchResults = $state<SearchResult[]>([]);
   let isGlobalSearching = $state(false);
   let globalSearchTimer: ReturnType<typeof setTimeout> | null = null;
-  let globalSearchInput: HTMLInputElement;
+  let globalSearchInput = $state<HTMLInputElement | undefined>(undefined);
   let toastMessage = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   let newWorkspaceOpen = $state(false);
@@ -643,6 +645,7 @@
 
   async function handleMarkdownClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
+    if (!target.closest('.md-reader__markdown-content')) return;
     
     // 1. Handle Code Copy
     const copyBtn = target.closest('.md-reader__btn--copy');
@@ -722,7 +725,7 @@
 </script>
 
 
-<div class="md-reader" ondblclick={() => { if (!filePath) openFile(); }} style="--side-width: {sidebarWidth}px;">
+<div class="md-reader" style="--side-width: {sidebarWidth}px;">
   <div class="md-reader__side">
     {#if folderPath}
       <button class="workspace-nav" onclick={openWorkspaceHome} aria-label={t('workspace.home')}>
@@ -881,7 +884,7 @@
         <div class="reading-context"><button class="reading-context__home" onclick={openWorkspaceHome}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
       {#key filePath}
-        <div class="md-reader__markdown-content centered" onclick={handleMarkdownClick}>
+        <div class="md-reader__markdown-content centered">
           {@html markdownHtml}
         </div>
       {/key}
@@ -901,7 +904,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="workspace-modal-overlay" onclick={() => !isCreatingWorkspace && (newWorkspaceOpen = false)}></div>
-  <section class="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-modal-title">
+  <dialog class="workspace-modal" open aria-labelledby="workspace-modal-title">
     <div class="workspace-modal__mark">✦</div>
     <p>PYRUS / NEW SPACE</p>
     <h2 id="workspace-modal-title">{t('workspace.new_title')}</h2>
@@ -909,7 +912,7 @@
     <input id="workspace-name" bind:value={newWorkspaceName} onkeydown={(event) => event.key === 'Enter' && createWorkspace()} placeholder={t('workspace.new_placeholder')} />
     {#if newWorkspaceError}<span class="workspace-modal__error">{newWorkspaceError}</span>{/if}
     <div class="workspace-modal__actions"><button class="btn-secondary" onclick={() => newWorkspaceOpen = false} disabled={isCreatingWorkspace}>{t('workspace.cancel')}</button><button class="btn-primary" onclick={createWorkspace} disabled={isCreatingWorkspace}>{isCreatingWorkspace ? '…' : t('workspace.new_choose')}</button></div>
-  </section>
+  </dialog>
 {/if}
 
 <button class="md-reader__btn floating-gear" onclick={() => drawerOpen = !drawerOpen} aria-label={t('settings.title')}>
@@ -920,7 +923,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="command-overlay" onclick={closeGlobalSearch}></div>
-  <section class="command-palette" aria-label={t('search.title')} role="dialog" aria-modal="true">
+  <dialog class="command-palette" open aria-label={t('search.title')}>
     <div class="command-palette__input"><span>⌕</span><input bind:this={globalSearchInput} bind:value={globalSearchQuery} placeholder={t('search.hint')} /><kbd>ESC</kbd></div>
     <div class="command-palette__results">
       {#if globalSearchQuery.trim() === ''}
@@ -937,7 +940,7 @@
         {/each}
       {/if}
     </div>
-  </section>
+  </dialog>
 {/if}
 
 {#if drawerOpen}
