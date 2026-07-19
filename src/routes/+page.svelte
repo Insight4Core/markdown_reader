@@ -1,14 +1,15 @@
 <script lang="ts">
   import { open, ask } from '@tauri-apps/plugin-dialog';
-  import { readTextFile, watch, readDir } from '@tauri-apps/plugin-fs';
+  import { readTextFile, writeTextFile, mkdir, exists, watch, readDir } from '@tauri-apps/plugin-fs';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { Store, load } from '@tauri-apps/plugin-store';
-  import { resolve, dirname } from '@tauri-apps/api/path';
+  import { resolve, dirname, join } from '@tauri-apps/api/path';
   import { i18nState, t, detectSystemLanguage } from '$lib/i18n.svelte';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { openUrl } from '@tauri-apps/plugin-opener';
   import { mdRender } from '@/core/markdown';
   import { tick, onMount } from 'svelte';
   import '@/style/index.less';
@@ -82,6 +83,10 @@
   let globalSearchInput: HTMLInputElement;
   let toastMessage = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
+  let newWorkspaceOpen = $state(false);
+  let newWorkspaceName = $state('My Knowledge Base');
+  let newWorkspaceError = $state('');
+  let isCreatingWorkspace = $state(false);
 
   $effect(() => {
     if (searchQuery.trim() === '') {
@@ -396,6 +401,57 @@
     }
   }
 
+  function showNewWorkspace() {
+    drawerOpen = false;
+    newWorkspaceError = '';
+    newWorkspaceOpen = true;
+    tick().then(() => document.getElementById('workspace-name')?.focus());
+  }
+
+  async function createWorkspace() {
+    const name = newWorkspaceName.trim();
+    if (!name || /[\\/]/.test(name)) {
+      newWorkspaceError = t('workspace.invalid_name');
+      return;
+    }
+    const selected = await open({ directory: true, multiple: false, title: 'Choose where to create your knowledge base' });
+    if (!selected) return;
+
+    isCreatingWorkspace = true;
+    newWorkspaceError = '';
+    try {
+      const workspacePath = await join(selected as string, name);
+      if (await exists(workspacePath)) {
+        newWorkspaceError = t('workspace.exists');
+        return;
+      }
+      await mkdir(workspacePath);
+      const welcomePath = await join(workspacePath, 'Welcome.md');
+      await writeTextFile(welcomePath, createWelcomeNote(name));
+      folderPath = workspacePath;
+      folderFiles = await scanFolder(folderPath, 1);
+      filePath = '';
+      sidebarTab = 'files';
+      newWorkspaceOpen = false;
+      await openSpecificFile(welcomePath);
+      toastMessage = `Welcome to ${name}`;
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastMessage = '', 2300);
+    } catch (error) {
+      console.error('Failed to create workspace:', error);
+      newWorkspaceError = t('workspace.create_failed');
+    } finally {
+      isCreatingWorkspace = false;
+    }
+  }
+
+  function createWelcomeNote(name: string) {
+    if (i18nState.locale === 'zh') {
+      return `# 欢迎来到 ${name}\n\n这里是你的私密阅读空间。所有内容都保存在这个文件夹和你的设备上。\n\n## 从这里开始\n\n- 把 Markdown 文件放进这个文件夹，Pyrus 会自动发现它们。\n- 点击 ✦ 固定重要笔记。\n- 随时按下 **⌘K**，搜索你的整个知识库。\n\n> Pyrus 会记住你的阅读位置，让你每次都能从上次停下的地方继续。\n\n开始阅读吧。\n`;
+    }
+    return `# Welcome to ${name}\n\nThis is your private reading space. Everything stays in this folder, on your device.\n\n## Start here\n\n- Add Markdown files to this folder and Pyrus will find them automatically.\n- Pin an important note with the ✦ button.\n- Press **⌘K** anytime to search your knowledge base.\n\n> Pyrus remembers where you stopped reading, so you can always pick up where you left off.\n\nHappy reading.\n`;
+  }
+
   async function refreshFolder() {
     if (folderPath) {
        folderFiles = await scanFolder(folderPath, 1);
@@ -567,6 +623,16 @@
     getCurrentWindow().setTitle('Pyrus');
     window.scrollTo({ top: 0, behavior: 'auto' });
     syncStore();
+  }
+
+  async function sendFeedback() {
+    const title = encodeURIComponent('[Feedback] ');
+    const body = encodeURIComponent('## What would make Pyrus better?\n\n\n## Context (optional)\n- OS:\n- Pyrus version:');
+    try {
+      await openUrl(`https://github.com/Insight4Core/markdown_reader/issues/new?title=${title}&body=${body}`);
+    } catch (error) {
+      console.error('Failed to open feedback page:', error);
+    }
   }
 
   function scrollTo(id: string) {
@@ -797,7 +863,7 @@
           <h2>{t('welcome.title')}</h2>
           <p class="welcome__subtitle">{t('welcome.subtitle')}</p>
           <div class="welcome__actions">
-            <button class="welcome__primary" onclick={openFile}>{t('settings.open_file')}</button>
+            <button class="welcome__primary" onclick={showNewWorkspace}>{t('workspace.new')}</button>
             <button class="welcome__secondary" onclick={openFolder}>{t('workspace.open_folder')}</button>
           </div>
           <section class="onboarding" aria-label={t('onboarding.label')}>
@@ -829,6 +895,21 @@
 
 {#if toastMessage}
   <div class="app-toast" role="status"><span>✦</span>{toastMessage}</div>
+{/if}
+
+{#if newWorkspaceOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="workspace-modal-overlay" onclick={() => !isCreatingWorkspace && (newWorkspaceOpen = false)}></div>
+  <section class="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="workspace-modal-title">
+    <div class="workspace-modal__mark">✦</div>
+    <p>PYRUS / NEW SPACE</p>
+    <h2 id="workspace-modal-title">{t('workspace.new_title')}</h2>
+    <label for="workspace-name">{t('workspace.new_name')}</label>
+    <input id="workspace-name" bind:value={newWorkspaceName} onkeydown={(event) => event.key === 'Enter' && createWorkspace()} placeholder={t('workspace.new_placeholder')} />
+    {#if newWorkspaceError}<span class="workspace-modal__error">{newWorkspaceError}</span>{/if}
+    <div class="workspace-modal__actions"><button class="btn-secondary" onclick={() => newWorkspaceOpen = false} disabled={isCreatingWorkspace}>{t('workspace.cancel')}</button><button class="btn-primary" onclick={createWorkspace} disabled={isCreatingWorkspace}>{isCreatingWorkspace ? '…' : t('workspace.new_choose')}</button></div>
+  </section>
 {/if}
 
 <button class="md-reader__btn floating-gear" onclick={() => drawerOpen = !drawerOpen} aria-label={t('settings.title')}>
@@ -869,6 +950,7 @@
     <button class="drawer__close" onclick={() => drawerOpen = false} aria-label={t('settings.close')}>×</button>
   </div>
   <div class="drawer__actions">
+    <button onclick={showNewWorkspace} class="btn-primary">{t('workspace.new')}</button>
     <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
     <button onclick={openFolder} class="btn-secondary">{t('settings.open_folder')}</button>
   </div>
@@ -932,7 +1014,7 @@
 
   <div class="settings-footer">
     <span>{t('settings.software')}</span>
-    <button onclick={() => checkUpdate(true)} class="text-button" disabled={isCheckingUpdate}>{isCheckingUpdate ? t('update.checking') : t('update.check_btn')}</button>
+    <div><button onclick={sendFeedback} class="text-button">{t('settings.feedback')}</button><button onclick={() => checkUpdate(true)} class="text-button" disabled={isCheckingUpdate}>{isCheckingUpdate ? t('update.checking') : t('update.check_btn')}</button></div>
   </div>
 </div>
 {/if}
@@ -968,7 +1050,8 @@
   .drawer__top { display: flex; align-items: flex-start; justify-content: space-between; }
   .drawer__close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-text-secondary); background: color-mix(in srgb, var(--color-bg) 72%, transparent); cursor: pointer; font-size: 24px; line-height: 1; transition: color .18s ease, background .18s ease; }
   .drawer__close:hover { color: var(--color-primary); background: var(--color-primary-alpha-10); }
-  .drawer__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .drawer__actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .drawer__actions .btn-primary:first-child { grid-column: span 2; }
   .settings-section { display: grid; gap: 2px; padding: 14px; border: 1px solid var(--color-side-border); border-radius: 14px; background: color-mix(in srgb, var(--color-bg) 48%, transparent); }
   .settings-section__title { margin: 0 0 6px; color: var(--color-text-gray); font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
   .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 39px; }
@@ -998,6 +1081,7 @@
   .setting-switch input:checked + i { background: var(--color-primary); }
   .setting-switch input:checked + i::after { transform: translateX(14px); }
   .settings-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding: 8px 3px 0; color: var(--color-text-gray); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .settings-footer > div { display: flex; align-items: center; gap: 11px; }
   .settings-footer .text-button { letter-spacing: normal; text-transform: none; }
   .btn-primary, .btn-secondary {
     min-height: 42px;
@@ -1031,6 +1115,17 @@
   .floating-gear { position: fixed; right: 28px; bottom: 28px; z-index: 100; display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-side-bg); color: var(--color-text-primary); box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
   .floating-gear span { font-size: 20px; transition: transform .35s ease; }
   .floating-gear:hover span { transform: rotate(55deg); }
+  .workspace-modal-overlay { position: fixed; inset: 0; z-index: 130; background: color-mix(in srgb, var(--color-text-primary) 17%, transparent); backdrop-filter: blur(7px); }
+  .workspace-modal { position: fixed; top: 50%; left: 50%; z-index: 131; display: flex; flex-direction: column; width: min(410px, calc(100vw - 32px)); padding: 28px; border: 1px solid var(--color-border); border-radius: 20px; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-side-bg) 95%, transparent); box-shadow: 0 24px 70px color-mix(in srgb, var(--color-text-primary) 25%, transparent); transform: translate(-50%, -50%); animation: modalIn .24s cubic-bezier(.2,.8,.2,1); backdrop-filter: blur(30px) saturate(150%); }
+  .workspace-modal__mark { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 18px; border-radius: 12px; color: var(--color-primary); background: var(--color-primary-alpha-10); font-size: 18px; }
+  .workspace-modal > p { margin: 0 0 7px; color: var(--color-primary); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
+  .workspace-modal h2 { margin: 0 0 24px; font-size: 25px; letter-spacing: -.04em; }
+  .workspace-modal label { margin-bottom: 7px; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+  .workspace-modal input { min-height: 42px; padding: 0 11px; border: 1px solid var(--color-border); border-radius: 10px; outline: 0; color: var(--color-text-primary); background: var(--color-bg); font: 13px var(--font-family-body); }
+  .workspace-modal input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-alpha-10); }
+  .workspace-modal__error { margin-top: 8px; color: var(--color-danger); font-size: 11px; }
+  .workspace-modal__actions { display: grid; grid-template-columns: .75fr 1.25fr; gap: 9px; margin-top: 22px; }
+  @keyframes modalIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 9px)) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
   .command-overlay { position: fixed; inset: 0; z-index: 120; background: color-mix(in srgb, var(--color-text-primary) 16%, transparent); backdrop-filter: blur(7px); }
   .command-palette { position: fixed; top: min(18vh, 160px); left: 50%; z-index: 121; width: min(620px, calc(100vw - 32px)); overflow: hidden; border: 1px solid var(--color-border); border-radius: 18px; background: color-mix(in srgb, var(--color-side-bg) 94%, transparent); box-shadow: 0 24px 70px color-mix(in srgb, var(--color-text-primary) 25%, transparent); transform: translateX(-50%); backdrop-filter: blur(30px) saturate(150%); -webkit-backdrop-filter: blur(30px) saturate(150%); animation: paletteIn .2s cubic-bezier(.2,.8,.2,1); }
   .command-palette__input { display: flex; align-items: center; gap: 12px; padding: 15px 16px; border-bottom: 1px solid var(--color-border); color: var(--color-primary); }
