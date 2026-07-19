@@ -43,11 +43,11 @@
       .feature-mark { display: grid; width: 35px; height: 35px; place-items: center; margin-bottom: 37px; border-radius: 10px; color: var(--blue); background: var(--blue-soft); font-size: 16px; }
       .feature h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: -.02em; }
       .feature p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
-      .gallery { display: grid; grid-template-columns: 1.16fr .84fr; gap: 16px; }
+      .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
       .gallery figure { margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: white; box-shadow: 0 15px 42px rgba(49,72,125,.06); }
       .gallery img { display: block; width: 100%; }
       .gallery figcaption { padding: 13px 15px; color: var(--muted); font-size: 12px; }
-      .gallery aside { display: grid; gap: 16px; }
+      .gallery aside { display: contents; }
       .promise { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; padding: 25px; border: 1px solid #d5def7; border-radius: 18px; background: linear-gradient(120deg, #eff3ff, #fbfaff); }
       .promise-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; color: var(--blue); background: white; box-shadow: 0 8px 20px rgba(69,96,163,.12); font-size: 19px; }
       .promise h3 { margin: 0 0 4px; font-size: 16px; }
@@ -56,9 +56,9 @@
       .closing h2 { max-width: 620px; margin: 0 auto 18px; }
       .closing p { max-width: 450px; margin: 0 auto 24px; color: var(--muted); font-size: 14px; line-height: 1.6; }
       .footer { display: flex; justify-content: space-between; padding: 24px 0 34px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
-      [lang="zh"] { display: none; }
-      body.zh [lang="en"] { display: none; }
+      body:not(.zh) [lang="zh"], body.zh [lang="en"] { display: none !important; }
       body.zh [lang="zh"] { display: initial; }
+      body.zh img[lang="zh"] { display: block; }
       @media (max-width: 760px) { .shell { width: min(100% - 28px, 560px); } .github { display: none; } .hero { grid-template-columns: 1fr; gap: 42px; min-height: auto; padding: 70px 0 85px; } .product-shot { width: 94%; margin: 0 auto; transform: none; } .floating-card { right: -8px; } .section { padding: 70px 0; } .section-heading { display: block; } .section-heading p { margin-top: 14px; } .features, .gallery { grid-template-columns: 1fr; } .feature { min-height: 175px; } .feature-mark { margin-bottom: 25px; } .footer { flex-direction: column; gap: 8px; } }
     </style>
   </head>
