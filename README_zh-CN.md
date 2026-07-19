@@ -9,7 +9,15 @@
 
 Pyrus 在成长阶段保持免费。它服务于已经用 Markdown 记录内容的人：提供一个更专注的地方阅读、回顾和找回知识，而不要求账户、云同步，也不把编辑器塞到你的面前。
 
-![Pyrus 欢迎页](./docs/screenshots/welcome.png)
+## 产品预览
+
+| 开始一个知识库 | 使用 `⌘K` 找回知识 |
+| --- | --- |
+| ![Pyrus 欢迎页](./docs/screenshots/welcome.png) | ![Pyrus 全局搜索](./docs/screenshots/global-search.png) |
+
+| 继续阅读 | 偏好设置 |
+| --- | --- |
+| ![Pyrus 阅读页](./docs/screenshots/reading.png) | ![Pyrus 偏好设置](./docs/screenshots/preferences.png) |
 
 ## 它解决了什么
 

@@ -22,9 +22,9 @@ This release is intended for early readers. If something feels unclear, breaks, 
 
 | Asset | File |
 | --- | --- |
-| Welcome and onboarding | `docs/screenshots/welcome.png` |
-| Create knowledge base | `docs/screenshots/new-knowledge-base.png` |
-| Knowledge home | `docs/screenshots/knowledge-home.png` |
-| Reading experience | `docs/screenshots/reading.png` |
-| Global search | `docs/screenshots/global-search.png` |
-| Preferences | `docs/screenshots/preferences.png` |
+| Welcome and onboarding | [welcome.png](./screenshots/welcome.png) |
+| Create knowledge base | [new-knowledge-base.png](./screenshots/new-knowledge-base.png) |
+| Knowledge home | [knowledge-home.png](./screenshots/knowledge-home.png) |
+| Reading experience | [reading.png](./screenshots/reading.png) |
+| Global search | [global-search.png](./screenshots/global-search.png) |
+| Preferences | [preferences.png](./screenshots/preferences.png) |
