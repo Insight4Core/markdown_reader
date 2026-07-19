@@ -52,6 +52,11 @@
       .promise-mark { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 15px; color: var(--blue); background: white; box-shadow: 0 8px 20px rgba(69,96,163,.12); font-size: 19px; }
       .promise h3 { margin: 0 0 4px; font-size: 16px; }
       .promise p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .support { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 42px; padding: 23px 25px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,.64); }
+      .support-copy { display: flex; gap: 15px; align-items: center; }
+      .support-mark { display: grid; flex: 0 0 auto; width: 38px; height: 38px; place-items: center; border-radius: 12px; color: #d97579; background: #fff2f2; font-size: 17px; }
+      .support h3 { margin: 0 0 3px; font-size: 14px; }
+      .support p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
       .closing { padding: 112px 0; text-align: center; }
       .closing h2 { max-width: 620px; margin: 0 auto 18px; }
       .closing p { max-width: 450px; margin: 0 auto 24px; color: var(--muted); font-size: 14px; line-height: 1.6; }
@@ -59,7 +64,7 @@
       body:not(.zh) [lang="zh"], body.zh [lang="en"] { display: none !important; }
       body.zh [lang="zh"] { display: initial; }
       body.zh img[lang="zh"] { display: block; }
-      @media (max-width: 760px) { .shell { width: min(100% - 28px, 560px); } .github { display: none; } .hero { grid-template-columns: 1fr; gap: 42px; min-height: auto; padding: 70px 0 85px; } .product-shot { width: 94%; margin: 0 auto; transform: none; } .floating-card { right: -8px; } .section { padding: 70px 0; } .section-heading { display: block; } .section-heading p { margin-top: 14px; } .features, .gallery { grid-template-columns: 1fr; } .feature { min-height: 175px; } .feature-mark { margin-bottom: 25px; } .footer { flex-direction: column; gap: 8px; } }
+      @media (max-width: 760px) { .shell { width: min(100% - 28px, 560px); } .github { display: none; } .hero { grid-template-columns: 1fr; gap: 42px; min-height: auto; padding: 70px 0 85px; } .product-shot { width: 94%; margin: 0 auto; transform: none; } .floating-card { right: -8px; } .section { padding: 70px 0; } .section-heading { display: block; } .section-heading p { margin-top: 14px; } .features, .gallery { grid-template-columns: 1fr; } .feature { min-height: 175px; } .feature-mark { margin-bottom: 25px; } .support { align-items: flex-start; flex-direction: column; } .footer { flex-direction: column; gap: 8px; } }
     </style>
   </head>
   <body>
@@ -92,6 +97,8 @@
       <section class="shell section"><div class="section-heading"><h2 lang="en">A small interface with a clear point of view.</h2><h2 lang="zh">一个小而有明确观点的界面。</h2><p lang="en">Nothing to configure before you can start reading.</p><p lang="zh">不必配置一堆选项，就可以开始阅读。</p></div><div class="gallery"><figure><img lang="en" src="./screenshots/global-search-en.png" alt="Pyrus global search" /><img lang="zh" src="./screenshots/global-search.png" alt="Pyrus 全局搜索" /><figcaption lang="en">Global search, ready whenever you are.</figcaption><figcaption lang="zh">全局搜索，在你需要时随时出现。</figcaption></figure><aside><figure><img lang="en" src="./screenshots/reading-en.png" alt="Pyrus reading experience" /><img lang="zh" src="./screenshots/reading.png" alt="Pyrus 阅读体验" /><figcaption lang="en">A live outline keeps long-form reading grounded.</figcaption><figcaption lang="zh">实时大纲让长文阅读始终有方向。</figcaption></figure><figure><img lang="en" src="./screenshots/preferences-en.png" alt="Pyrus preferences" /><img lang="zh" src="./screenshots/preferences.png" alt="Pyrus 偏好设置" /><figcaption lang="en">Preferences without the clutter.</figcaption><figcaption lang="zh">清爽而不复杂的偏好设置。</figcaption></figure></aside></div></section>
 
       <section class="shell promise"><div class="promise-mark">⌂</div><div><h3 lang="en">Your notes stay on your device.</h3><h3 lang="zh">你的笔记始终留在设备上。</h3><p lang="en">Pyrus does not require an account or cloud sync. Your Markdown files remain ordinary files in folders you control.</p><p lang="zh">Pyrus 不要求账户或云同步。你的 Markdown 始终是你自己掌控的普通文件。</p></div></section>
+
+      <section class="shell support"><div class="support-copy"><div class="support-mark">♥</div><div><h3 lang="en">Keep Pyrus growing</h3><h3 lang="zh">支持 Pyrus 持续成长</h3><p lang="en">Pyrus is free and local-first. If it helps your notes feel more useful, you can support its continued development.</p><p lang="zh">Pyrus 保持免费、本地优先。若它让你的笔记更值得回访，欢迎支持后续开发。</p></div></div><a class="button" href="https://github.com/sponsors/Insight4Core" lang="en">Sponsor on GitHub ↗</a><a class="button" href="https://afdian.com/a/insightcore" lang="zh">在爱发电支持 ↗</a></section>
 
       <section class="shell closing"><h2 lang="en">Try the reading space your notes deserve.</h2><h2 lang="zh">试试你的笔记值得拥有的阅读空间。</h2><p lang="en">Pyrus is free during Early Access. Your feedback will shape what it becomes next.</p><p lang="zh">Pyrus 在 Early Access 阶段免费。你的反馈会决定它接下来成为怎样的产品。</p><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="en">Download Pyrus</a><a class="button primary" href="https://github.com/Insight4Core/markdown_reader/releases" lang="zh">下载 Pyrus</a></section>
     </main>

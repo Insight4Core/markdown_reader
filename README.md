@@ -42,6 +42,12 @@ Pre-release builds will be published on the [Releases](https://github.com/Insigh
 
 Pyrus is shaped by early readers. Use **Send feedback** in Preferences, or open a [GitHub issue](https://github.com/Insight4Core/markdown_reader/issues) to share an idea or report a problem.
 
+## Support Pyrus
+
+Pyrus is free and local-first. If it has made your Markdown library a more useful place to return to, you can support its continued development through [GitHub Sponsors](https://github.com/sponsors/Insight4Core).
+
+For readers in mainland China, support is also available on [爱发电](https://afdian.com/a/insightcore).
+
 ## Development
 
 Requirements: Node.js, Rust, and the platform prerequisites for Tauri.
