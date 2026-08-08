@@ -61,6 +61,18 @@
   let recentFiles = $state<string[]>([]);
   let pinnedFiles = $state<string[]>([]);
   let readingProgress = $state<Record<string, { position: number; total: number; updatedAt: number }>>({});
+  interface RediscoveryPreference {
+    snoozedUntil?: number;
+    dismissed?: boolean;
+  }
+  type RediscoveryKind = 'sleeping' | 'pinned' | 'unread';
+  interface RediscoveryDocument {
+    name: string;
+    path: string;
+    depth: number;
+    kind: RediscoveryKind;
+  }
+  let rediscoveryPreferences = $state<Record<string, RediscoveryPreference>>({});
   let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingScrollPosition: number | null = null;
   let pendingSearchTerm = '';
@@ -155,6 +167,8 @@
       .filter(Boolean)
       .slice(0, 5)
   );
+  let rediscoveryDocuments = $derived(buildRediscoveryDocuments());
+  let hiddenRediscoveryCount = $derived(markdownFiles.filter(file => rediscoveryPreferences[file.path]?.dismissed).length);
   
   let headers = $state<{id: string, text: string, level: number}[]>([]);
   let activeHeaderId = $state('');
@@ -177,6 +191,7 @@
     await store.set('recentFiles', recentFiles);
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
+    await store.set('rediscoveryPreferences', rediscoveryPreferences);
     await store.save();
     console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth, locale: i18nState.locale, appTheme: currentTheme, appFont});
   }
@@ -249,6 +264,8 @@
         if (Array.isArray(savedPinned)) pinnedFiles = savedPinned;
         const savedProgress = await store.get<Record<string, { position: number; total: number; updatedAt: number }>>('readingProgress');
         if (savedProgress && typeof savedProgress === 'object') readingProgress = savedProgress;
+        const savedRediscoveryPreferences = await store.get<Record<string, RediscoveryPreference>>('rediscoveryPreferences');
+        if (savedRediscoveryPreferences && typeof savedRediscoveryPreferences === 'object') rediscoveryPreferences = savedRediscoveryPreferences;
 
         const savedFilePath = await store.get<{value?: string} | string>('filePath');
         if (savedFilePath) {
@@ -588,6 +605,108 @@
     return Math.min(100, Math.round((progress.position / Math.max(progress.total || 1, 1)) * 100));
   }
 
+  function buildRediscoveryDocuments(): RediscoveryDocument[] {
+    const now = Date.now();
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+    const recentSet = new Set(recentFiles.slice(0, 3));
+    const candidates = markdownFiles.filter(file => {
+      const preference = rediscoveryPreferences[file.path];
+      return !preference?.dismissed && (!preference?.snoozedUntil || preference.snoozedUntil <= now);
+    });
+    const selected: RediscoveryDocument[] = [];
+    const selectedPaths = new Set<string>();
+
+    const addFirst = (items: typeof candidates, kind: RediscoveryKind) => {
+      const item = items.find(candidate => !selectedPaths.has(candidate.path));
+      if (!item) return;
+      selected.push({ ...item, kind });
+      selectedPaths.add(item.path);
+    };
+
+    const oldestFirst = (a: typeof candidates[number], b: typeof candidates[number]) =>
+      (readingProgress[a.path]?.updatedAt || 0) - (readingProgress[b.path]?.updatedAt || 0);
+    const dailyRank = (path: string) => stableHash(`${new Date().toISOString().slice(0, 10)}:${path}`);
+
+    addFirst(
+      candidates
+        .filter(file => readingProgress[file.path]?.updatedAt && readingProgress[file.path].updatedAt <= sevenDaysAgo)
+        .sort(oldestFirst),
+      'sleeping'
+    );
+    addFirst(
+      candidates
+        .filter(file => pinnedFiles.includes(file.path) && !recentSet.has(file.path))
+        .sort(oldestFirst),
+      'pinned'
+    );
+    addFirst(
+      candidates
+        .filter(file => !readingProgress[file.path] && !recentSet.has(file.path))
+        .sort((a, b) => dailyRank(a.path) - dailyRank(b.path)),
+      'unread'
+    );
+
+    const fallback = candidates
+      .filter(file => !recentSet.has(file.path) && !selectedPaths.has(file.path))
+      .sort((a, b) => dailyRank(a.path) - dailyRank(b.path));
+    for (const file of fallback) {
+      if (selected.length >= 3) break;
+      const kind: RediscoveryKind = pinnedFiles.includes(file.path)
+        ? 'pinned'
+        : readingProgress[file.path]
+          ? 'sleeping'
+          : 'unread';
+      selected.push({ ...file, kind });
+      selectedPaths.add(file.path);
+    }
+    return selected.slice(0, 3);
+  }
+
+  function stableHash(value: string) {
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+    return Math.abs(hash);
+  }
+
+  function rediscoveryReason(document: RediscoveryDocument) {
+    if (document.kind === 'unread') return t('rediscovery.reason_unread');
+    if (document.kind === 'pinned') return t('rediscovery.reason_pinned');
+    const updatedAt = readingProgress[document.path]?.updatedAt;
+    if (!updatedAt) return t('rediscovery.reason_sleeping');
+    const days = Math.max(1, Math.floor((Date.now() - updatedAt) / 86400000));
+    return `${days}${t('rediscovery.reason_days')}`;
+  }
+
+  function snoozeRediscovery(path: string, days: number) {
+    rediscoveryPreferences = {
+      ...rediscoveryPreferences,
+      [path]: { ...rediscoveryPreferences[path], snoozedUntil: Date.now() + days * 86400000 }
+    };
+    toastMessage = days === 1 ? t('rediscovery.skipped_toast') : t('rediscovery.snoozed_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+  }
+
+  function dismissRediscovery(path: string) {
+    rediscoveryPreferences = {
+      ...rediscoveryPreferences,
+      [path]: { ...rediscoveryPreferences[path], dismissed: true }
+    };
+    toastMessage = t('rediscovery.dismissed_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+  }
+
+  function resetRediscovery() {
+    rediscoveryPreferences = {};
+    toastMessage = t('rediscovery.reset_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+  }
+
   function formatLastRead(path: string) {
     const updatedAt = readingProgress[path]?.updatedAt;
     if (!updatedAt) return '';
@@ -829,6 +948,40 @@
           <h2>{workspaceName}</h2>
           <p class="welcome__subtitle">{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
           <div class="workspace-grid">
+            <section class="workspace-card workspace-card--rediscover">
+              <div class="rediscovery-heading">
+                <div class="workspace-card__heading"><span>◌</span><h3>{t('rediscovery.title')}</h3></div>
+                <span class="rediscovery-heading__local">{t('rediscovery.local')}</span>
+              </div>
+              <p class="rediscovery-intro">{t('rediscovery.subtitle')}</p>
+              {#if rediscoveryDocuments.length}
+                <div class="rediscovery-list">
+                  {#each rediscoveryDocuments as doc}
+                    <article class="rediscovery-note">
+                      <button class="rediscovery-note__main" onclick={() => openSpecificFile(doc.path)}>
+                        <small>{rediscoveryReason(doc)}</small>
+                        <strong>{doc.name}</strong>
+                        <span>{doc.path.replace(folderPath, '').replace(/^[/\\]/, '')}</span>
+                        <i>→</i>
+                      </button>
+                      <details class="rediscovery-note__menu">
+                        <summary aria-label={t('rediscovery.more')}>•••</summary>
+                        <div>
+                          <button onclick={() => snoozeRediscovery(doc.path, 1)}>{t('rediscovery.skip')}</button>
+                          <button onclick={() => snoozeRediscovery(doc.path, 30)}>{t('rediscovery.in_30_days')}</button>
+                          <button onclick={() => dismissRediscovery(doc.path)}>{t('rediscovery.dismiss')}</button>
+                        </div>
+                      </details>
+                    </article>
+                  {/each}
+                </div>
+              {:else}
+                <p class="workspace-card__empty rediscovery-empty">{t('rediscovery.empty')}</p>
+              {/if}
+              {#if hiddenRediscoveryCount > 0}
+                <button class="rediscovery-reset" onclick={resetRediscovery}>{t('rediscovery.restore')} ({hiddenRediscoveryCount})</button>
+              {/if}
+            </section>
             <section class="workspace-card workspace-card--continue">
               <div class="workspace-card__heading"><span>↳</span><h3>{t('workspace.continue')}</h3></div>
               {#if continueDocuments.length}
@@ -1278,6 +1431,28 @@
   .workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(800px, 100%); gap: 14px; }
   .workspace-card { min-height: 190px; padding: 20px; border: 1px solid var(--color-border); border-radius: 16px; background: color-mix(in srgb, var(--color-bg) 82%, transparent); box-shadow: 0 16px 38px color-mix(in srgb, var(--color-text-primary) 5%, transparent); }
   .workspace-card--pinned { border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border)); }
+  .workspace-card--rediscover { grid-column: span 2; min-height: 0; padding: 23px; overflow: visible; border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border)); background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary-alpha-10) 58%, var(--color-bg)), color-mix(in srgb, var(--color-bg) 92%, transparent)); }
+  .rediscovery-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .rediscovery-heading__local { padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border)); border-radius: 999px; color: var(--color-primary); background: color-mix(in srgb, var(--color-bg) 68%, transparent); font-size: 8px; font-weight: 750; letter-spacing: .1em; }
+  .rediscovery-intro { max-width: 570px; margin: 8px 0 19px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
+  .rediscovery-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .rediscovery-note { position: relative; min-width: 0; border: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-border)); border-radius: 13px; background: color-mix(in srgb, var(--color-bg) 88%, transparent); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+  .rediscovery-note:hover { border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border)); box-shadow: 0 12px 24px color-mix(in srgb, var(--color-text-primary) 6%, transparent); transform: translateY(-1px); }
+  .rediscovery-note__main { position: relative; display: flex; flex-direction: column; width: 100%; min-height: 126px; padding: 15px 37px 15px 15px; overflow: hidden; border: 0; border-radius: inherit; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; }
+  .rediscovery-note__main small { margin-bottom: 10px; color: var(--color-primary); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+  .rediscovery-note__main strong { overflow: hidden; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .rediscovery-note__main span { margin-top: 5px; overflow: hidden; color: var(--color-text-gray); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .rediscovery-note__main i { margin-top: auto; color: var(--color-primary); font-size: 15px; font-style: normal; }
+  .rediscovery-note__menu { position: absolute; top: 10px; right: 9px; z-index: 3; }
+  .rediscovery-note__menu summary { display: grid; place-items: center; width: 27px; height: 25px; border-radius: 7px; color: var(--color-text-gray); cursor: pointer; font-size: 9px; list-style: none; letter-spacing: .04em; }
+  .rediscovery-note__menu summary::-webkit-details-marker { display: none; }
+  .rediscovery-note__menu summary:hover, .rediscovery-note__menu[open] summary { color: var(--color-primary); background: var(--color-primary-alpha-10); }
+  .rediscovery-note__menu > div { position: absolute; top: 30px; right: 0; display: grid; width: 154px; padding: 5px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-side-bg); box-shadow: 0 15px 35px color-mix(in srgb, var(--color-text-primary) 16%, transparent); }
+  .rediscovery-note__menu button { padding: 8px 9px; border: 0; border-radius: 7px; color: var(--color-text-secondary); background: transparent; cursor: pointer; font: 10px var(--font-family-body); text-align: left; }
+  .rediscovery-note__menu button:hover { color: var(--color-text-primary); background: var(--color-primary-alpha-10); }
+  .rediscovery-empty { margin-top: 15px; }
+  .rediscovery-reset { margin-top: 12px; padding: 0; border: 0; color: var(--color-text-gray); background: transparent; cursor: pointer; font-size: 9px; }
+  .rediscovery-reset:hover { color: var(--color-primary); }
   .workspace-card--continue { grid-column: span 2; border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border)); background: color-mix(in srgb, var(--color-primary-alpha-10) 38%, var(--color-bg)); }
   .workspace-card--continue .workspace-card__heading h3 { font-size: 16px; }
   .workspace-card--continue .document-list button { padding: 11px 9px; }
@@ -1306,6 +1481,6 @@
   :global(mark.search-highlight) { border-radius: 3px; color: inherit; background: var(--color-mark); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mark) 55%, transparent); transition: background .7s ease, box-shadow .7s ease; }
   :global(mark.search-highlight--soft) { background: color-mix(in srgb, var(--color-mark) 28%, transparent); box-shadow: none; }
   @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
-  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue { grid-column: span 1; } .reading-context { padding: 0 28px; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
+  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--rediscover { grid-column: span 1; } .rediscovery-list { grid-template-columns: 1fr; } .rediscovery-note__main { min-height: 112px; } .reading-context { padding: 0 28px; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
   @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 60px 28px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } }
 </style>
