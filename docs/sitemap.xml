@@ -35,4 +35,14 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/markdown-folder-knowledge-base/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/markdown-folder-knowledge-base/" />
   </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/search-cannot-find-forgotten-notes/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/search-cannot-find-forgotten-notes/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/search-cannot-find-forgotten-notes/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/zh-cn/search-cannot-find-forgotten-notes/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/search-cannot-find-forgotten-notes/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/search-cannot-find-forgotten-notes/" />
+  </url>
 </urlset>
