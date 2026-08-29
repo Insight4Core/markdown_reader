@@ -3,19 +3,22 @@
   <h1>Pyrus</h1>
   <p><strong>A calm, local-first reading space that brings forgotten Markdown notes back to you.</strong></p>
   <p><strong>English</strong> · <a href="./README_zh-CN.md">简体中文</a></p>
+  <p><a href="https://insight4core.github.io/markdown_reader/en/">Website</a> · <a href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download</a></p>
 </div>
 
 ## Early Access
 
 Pyrus is free while it grows. It is built for people who already keep notes in Markdown and want a more focused place to read, rediscover, and find them—without accounts, cloud sync, or an editor getting in the way.
 
-## Rediscover what you already know
+## Your notes return when they matter
 
 Writing a note is easy. Remembering that it exists months later is harder.
 
-Pyrus brings up to three worthwhile notes back to your knowledge home: something you have not read yet, something you once pinned, or something you have not opened for a while. Each suggestion explains why it appeared, and you can skip it for today, bring it back in 30 days, or hide it.
+While you read, **Knowledge Echoes** quietly finds an older note connected to the page in front of you. It shows the passage that made the connection, the shared ideas, and why the note has returned—perhaps because you pinned it or have not read it for months.
 
-The recommendation is calculated entirely on your device from local reading activity. Pyrus does not upload or inspect your knowledge base through an external service.
+Open the note, move to the next echo, bring it back later, or mark it as unrelated. Pyrus remembers useful feedback and combines it with pins and reading history. The knowledge home still brings back unread and long-unvisited notes when you want a broader rediscovery moment.
+
+Every connection is calculated entirely on your device. Pyrus does not upload or inspect your knowledge base through an external service.
 
 ## Preview
 
@@ -30,12 +33,13 @@ The recommendation is calculated entirely on your device from local reading acti
 ## What makes it useful
 
 - **Rediscover forgotten notes** — Bring back unread, previously pinned, and long-unvisited notes instead of letting them disappear into a folder.
+- **Meet knowledge in context** — Knowledge Echoes surfaces a related old note while you read, with a relevant excerpt and shared themes.
 - **Local knowledge spaces** — Open an existing folder or create a new knowledge base with a ready-to-read `Welcome.md`.
 - **Pick up where you stopped** — Pyrus saves your reading position for every document and surfaces it on the knowledge home.
 - **Pin what matters** — Keep essential notes one click away.
 - **Find knowledge instantly** — Press `⌘K` on macOS or `Ctrl+K` elsewhere to search file names and document content, then jump to the matching passage.
 - **Read long documents with context** — A live outline follows your position in the document, alongside a subtle reading-progress indicator.
-- **Private by default** — Notes, pins, recents, progress, and rediscovery preferences stay on your device.
+- **Private by default** — Notes, pins, recents, progress, echo feedback, and rediscovery preferences stay on your device.
 
 ## Getting started
 

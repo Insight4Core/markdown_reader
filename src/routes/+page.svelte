@@ -2,7 +2,7 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { readTextFile, writeTextFile, mkdir, exists, watch, readDir } from '@tauri-apps/plugin-fs';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { Store, load } from '@tauri-apps/plugin-store';
+  import { load } from '@tauri-apps/plugin-store';
   import { resolve, dirname, join } from '@tauri-apps/api/path';
   import { i18nState, t, detectSystemLanguage } from '$lib/i18n.svelte';
   import { check } from '@tauri-apps/plugin-updater';
@@ -15,18 +15,22 @@
   import '@/style/index.less';
 
   onMount(() => {
-    const unlistenPromise = listen('sys-open-file', (event) => {
-      const path = event.payload as string;
-      if (path && typeof path === 'string') {
-        let cleanPath = path;
-        // Handle macOS file:// URLs if necessary
-        if (cleanPath.startsWith('file://')) {
-          cleanPath = decodeURIComponent(cleanPath.slice(7));
+    let unlistenPromise: ReturnType<typeof listen> | null = null;
+    let echoResizeObserver: ResizeObserver | null = null;
+    if ('__TAURI_INTERNALS__' in window) {
+      unlistenPromise = listen('sys-open-file', (event) => {
+        const path = event.payload as string;
+        if (path && typeof path === 'string') {
+          let cleanPath = path;
+          // Handle macOS file:// URLs if necessary
+          if (cleanPath.startsWith('file://')) {
+            cleanPath = decodeURIComponent(cleanPath.slice(7));
+          }
+          console.log("Received file from OS:", cleanPath);
+          openSpecificFile(cleanPath);
         }
-        console.log("Received file from OS:", cleanPath);
-        openSpecificFile(cleanPath);
-      }
-    });
+      });
+    }
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
     document.addEventListener('click', handleMarkdownClick);
     const handleGlobalShortcut = (event: KeyboardEvent) => {
@@ -35,13 +39,33 @@
         openGlobalSearch();
       }
       if (event.key === 'Escape' && globalSearchOpen) closeGlobalSearch();
+      else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) knowledgeEchoExpanded = false;
+    };
+    const handleOutsideEchoClick = (event: MouseEvent) => {
+      if (!compactEchoMode || !knowledgeEchoExpanded) return;
+      const target = event.target as HTMLElement;
+      if (!target.closest('.knowledge-echo')) knowledgeEchoExpanded = false;
     };
     window.addEventListener('keydown', handleGlobalShortcut);
+    document.addEventListener('click', handleOutsideEchoClick);
+    requestAnimationFrame(() => {
+      const readingBody = document.querySelector('.md-reader__body');
+      if (!readingBody || typeof ResizeObserver === 'undefined') return;
+      echoResizeObserver = new ResizeObserver(entries => {
+        const isCompact = (entries[0]?.contentRect.width || 0) < 1100;
+        if (isCompact === compactEchoMode) return;
+        compactEchoMode = isCompact;
+        knowledgeEchoExpanded = !isCompact;
+      });
+      echoResizeObserver.observe(readingBody);
+    });
     return () => {
       window.removeEventListener('scroll', saveReadingProgress);
       document.removeEventListener('click', handleMarkdownClick);
       window.removeEventListener('keydown', handleGlobalShortcut);
-      unlistenPromise.then(unlisten => unlisten());
+      document.removeEventListener('click', handleOutsideEchoClick);
+      echoResizeObserver?.disconnect();
+      unlistenPromise?.then(unlisten => unlisten());
     };
   });
 
@@ -73,6 +97,28 @@
     kind: RediscoveryKind;
   }
   let rediscoveryPreferences = $state<Record<string, RediscoveryPreference>>({});
+  interface KnowledgeEcho {
+    file_path: string;
+    file_name: string;
+    snippet: string;
+    matched_terms: string[];
+    score: number;
+  }
+  interface EchoPreference {
+    snoozedUntil?: number;
+    dismissed?: boolean;
+    helpfulCount?: number;
+    openedCount?: number;
+    lastOpenedAt?: number;
+  }
+  let knowledgeEchoes = $state<KnowledgeEcho[]>([]);
+  let knowledgeEchoIndex = $state(0);
+  let knowledgeEchoLoading = $state(false);
+  let knowledgeEchoExpanded = $state(false);
+  let compactEchoMode = $state(true);
+  let knowledgeEchoEnabled = $state(true);
+  let echoPreferences = $state<Record<string, EchoPreference>>({});
+  let echoRequestId = 0;
   let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingScrollPosition: number | null = null;
   let pendingSearchTerm = '';
@@ -169,6 +215,7 @@
   );
   let rediscoveryDocuments = $derived(buildRediscoveryDocuments());
   let hiddenRediscoveryCount = $derived(markdownFiles.filter(file => rediscoveryPreferences[file.path]?.dismissed).length);
+  let hiddenEchoCount = $derived(Object.values(echoPreferences).filter(preference => preference.dismissed).length);
   
   let headers = $state<{id: string, text: string, level: number}[]>([]);
   let activeHeaderId = $state('');
@@ -192,6 +239,8 @@
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
     await store.set('rediscoveryPreferences', rediscoveryPreferences);
+    await store.set('echoPreferences', echoPreferences);
+    await store.set('knowledgeEchoEnabled', knowledgeEchoEnabled);
     await store.save();
     console.log("[Store] Saved data:", {folderPath, filePath, maxDepth, sidebarWidth, locale: i18nState.locale, appTheme: currentTheme, appFont});
   }
@@ -266,6 +315,10 @@
         if (savedProgress && typeof savedProgress === 'object') readingProgress = savedProgress;
         const savedRediscoveryPreferences = await store.get<Record<string, RediscoveryPreference>>('rediscoveryPreferences');
         if (savedRediscoveryPreferences && typeof savedRediscoveryPreferences === 'object') rediscoveryPreferences = savedRediscoveryPreferences;
+        const savedEchoPreferences = await store.get<Record<string, EchoPreference>>('echoPreferences');
+        if (savedEchoPreferences && typeof savedEchoPreferences === 'object') echoPreferences = savedEchoPreferences;
+        const savedKnowledgeEchoEnabled = await store.get('knowledgeEchoEnabled') as boolean | null;
+        if (typeof savedKnowledgeEchoEnabled === 'boolean') knowledgeEchoEnabled = savedKnowledgeEchoEnabled;
 
         const savedFilePath = await store.get<{value?: string} | string>('filePath');
         if (savedFilePath) {
@@ -491,12 +544,14 @@
 
   async function openSpecificFile(path: string) {
     if (!path) return;
+    if (compactEchoMode) knowledgeEchoExpanded = false;
     filePath = path;
     getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || 'Pyrus');
     sidebarTab = 'toc'; // 需求：点击后自动跳转大纲模式
     recentFiles = [path, ...recentFiles.filter(item => item !== path)].slice(0, 8);
     pendingScrollPosition = readingProgress[path]?.position ?? 0;
     await loadContent();
+    void loadKnowledgeEchoes(path);
     
     syncStore();
 
@@ -508,6 +563,139 @@
     } catch (e) {
       console.warn("Watch file failed:", e);
     }
+  }
+
+  function echoPreferenceKey(sourcePath: string, targetPath: string) {
+    return `${sourcePath}::${targetPath}`;
+  }
+
+  async function loadKnowledgeEchoes(sourcePath: string) {
+    const requestId = ++echoRequestId;
+    knowledgeEchoes = [];
+    knowledgeEchoIndex = 0;
+    if (!knowledgeEchoEnabled || !folderPath || !sourcePath.startsWith(folderPath)) {
+      knowledgeEchoLoading = false;
+      return;
+    }
+    knowledgeEchoLoading = true;
+    try {
+      const results = await invoke('find_knowledge_echoes', {
+        rootPath: folderPath,
+        currentFile: sourcePath,
+        limit: 8
+      }) as KnowledgeEcho[];
+      if (requestId !== echoRequestId || filePath !== sourcePath) return;
+      const now = Date.now();
+      knowledgeEchoes = results.filter(echo => {
+        const preference = echoPreferences[echoPreferenceKey(sourcePath, echo.file_path)];
+        return !preference?.dismissed && (!preference?.snoozedUntil || preference.snoozedUntil <= now);
+      }).sort((a, b) => echoDisplayScore(sourcePath, b) - echoDisplayScore(sourcePath, a)).slice(0, 5);
+    } catch (error) {
+      if (requestId === echoRequestId) knowledgeEchoes = [];
+      console.error('Failed to find knowledge echoes:', error);
+    } finally {
+      if (requestId === echoRequestId) knowledgeEchoLoading = false;
+    }
+  }
+
+  function currentKnowledgeEcho() {
+    return knowledgeEchoes[knowledgeEchoIndex];
+  }
+
+  function compactEchoLabel() {
+    if (knowledgeEchoLoading) return t('echo.finding');
+    return `${t('echo.found_prefix')}${knowledgeEchoes.length}${t('echo.found_suffix')}`;
+  }
+
+  function echoDisplayScore(sourcePath: string, echo: KnowledgeEcho) {
+    const preference = echoPreferences[echoPreferenceKey(sourcePath, echo.file_path)];
+    const lastRead = readingProgress[echo.file_path]?.updatedAt;
+    const forgottenBonus = lastRead ? Math.min((Date.now() - lastRead) / 86400000 / 365, 1) * 0.06 : 0;
+    return echo.score
+      + (pinnedFiles.includes(echo.file_path) ? 0.09 : 0)
+      + forgottenBonus
+      + Math.min(preference?.helpfulCount || 0, 3) * 0.05
+      + Math.min(preference?.openedCount || 0, 3) * 0.01;
+  }
+
+  async function updateEchoPreference(targetPath: string, update: Partial<EchoPreference>) {
+    const key = echoPreferenceKey(filePath, targetPath);
+    echoPreferences = {
+      ...echoPreferences,
+      [key]: { ...echoPreferences[key], ...update }
+    };
+    await syncStore();
+  }
+
+  function showNextEcho() {
+    if (knowledgeEchoes.length < 2) return;
+    knowledgeEchoIndex = (knowledgeEchoIndex + 1) % knowledgeEchoes.length;
+  }
+
+  function removeCurrentEcho() {
+    knowledgeEchoes = knowledgeEchoes.filter((_, index) => index !== knowledgeEchoIndex);
+    knowledgeEchoIndex = Math.min(knowledgeEchoIndex, Math.max(knowledgeEchoes.length - 1, 0));
+  }
+
+  async function openKnowledgeEcho(echo: KnowledgeEcho) {
+    await updateEchoPreference(echo.file_path, {
+      openedCount: (echoPreferences[echoPreferenceKey(filePath, echo.file_path)]?.openedCount || 0) + 1,
+      lastOpenedAt: Date.now()
+    });
+    await openSpecificFile(echo.file_path);
+  }
+
+  function markEchoHelpful(echo: KnowledgeEcho) {
+    const preference = echoPreferences[echoPreferenceKey(filePath, echo.file_path)];
+    void updateEchoPreference(echo.file_path, { helpfulCount: (preference?.helpfulCount || 0) + 1 });
+    toastMessage = t('echo.helpful_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+  }
+
+  function snoozeKnowledgeEcho(echo: KnowledgeEcho) {
+    void updateEchoPreference(echo.file_path, { snoozedUntil: Date.now() + 7 * 86400000 });
+    removeCurrentEcho();
+    toastMessage = t('echo.snoozed_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+  }
+
+  function dismissKnowledgeEcho(echo: KnowledgeEcho) {
+    void updateEchoPreference(echo.file_path, { dismissed: true });
+    removeCurrentEcho();
+    toastMessage = t('echo.dismissed_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+  }
+
+  function resetKnowledgeEchoes() {
+    echoPreferences = {};
+    toastMessage = t('echo.reset_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+    if (filePath) void loadKnowledgeEchoes(filePath);
+  }
+
+  function handleKnowledgeEchoToggle() {
+    echoRequestId += 1;
+    knowledgeEchoes = [];
+    knowledgeEchoLoading = false;
+    syncStore();
+    if (knowledgeEchoEnabled && filePath) void loadKnowledgeEchoes(filePath);
+  }
+
+  function echoContext(echo: KnowledgeEcho) {
+    const context: string[] = [];
+    if (pinnedFiles.includes(echo.file_path)) context.push(t('echo.context_pinned'));
+    const lastRead = readingProgress[echo.file_path]?.updatedAt;
+    if (lastRead) {
+      const days = Math.max(1, Math.floor((Date.now() - lastRead) / 86400000));
+      if (days >= 7) context.push(`${days}${t('echo.context_days')}`);
+    }
+    if (context.length === 0) context.push(t('echo.context_related'));
+    return context.join(' · ');
   }
 
   function togglePin(path: string) {
@@ -719,6 +907,9 @@
 
   function openWorkspaceHome() {
     if (!folderPath) return;
+    echoRequestId += 1;
+    knowledgeEchoes = [];
+    knowledgeEchoLoading = false;
     filePath = '';
     markdownHtml = '';
     headers = [];
@@ -735,6 +926,9 @@
       unwatch = null;
     }
     folderPath = '';
+    echoRequestId += 1;
+    knowledgeEchoes = [];
+    knowledgeEchoLoading = false;
     filePath = '';
     folderFiles = [];
     headers = [];
@@ -1036,11 +1230,57 @@
       {#if folderPath}
         <div class="reading-context"><button class="reading-context__home" onclick={openWorkspaceHome}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
-      {#key filePath}
-        <div class="md-reader__markdown-content centered">
-          {@html markdownHtml}
-        </div>
-      {/key}
+      <div class:reading-shell--with-echo={knowledgeEchoLoading || knowledgeEchoes.length > 0} class="reading-shell">
+        {#key filePath}
+          <div class="md-reader__markdown-content centered">
+            {@html markdownHtml}
+          </div>
+        {/key}
+        {#if knowledgeEchoLoading || knowledgeEchoes.length > 0}
+          <aside class:knowledge-echo--collapsed={!knowledgeEchoExpanded} class:knowledge-echo--compact={compactEchoMode} class="knowledge-echo" aria-label={t('echo.title')}>
+            <button class="knowledge-echo__toggle" onclick={() => knowledgeEchoExpanded = !knowledgeEchoExpanded} aria-expanded={knowledgeEchoExpanded}>
+              <span class="knowledge-echo__symbol">◌</span>
+              <span><small>PYRUS</small><strong>{compactEchoMode ? compactEchoLabel() : t('echo.title')}</strong></span>
+              <i>{knowledgeEchoExpanded ? '−' : '+'}</i>
+            </button>
+            {#if knowledgeEchoExpanded}
+              {#if knowledgeEchoLoading}
+                <div class="knowledge-echo__loading" aria-live="polite">
+                  <span></span><span></span><span></span>
+                  <p>{t('echo.listening')}</p>
+                </div>
+              {:else if currentKnowledgeEcho()}
+                {@const echo = currentKnowledgeEcho()!}
+                <div class="knowledge-echo__body">
+                  <div class="knowledge-echo__meta">
+                    <span>{t('echo.from_past')}</span>
+                    {#if knowledgeEchoes.length > 1}
+                      <button onclick={showNextEcho} aria-label={t('echo.next')}>{knowledgeEchoIndex + 1} / {knowledgeEchoes.length}<i>→</i></button>
+                    {/if}
+                  </div>
+                  <button class="knowledge-echo__document" onclick={() => openKnowledgeEcho(echo)}>
+                    <strong>{echo.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
+                    <small>{echoContext(echo)}</small>
+                    <blockquote>{echo.snippet || t('echo.no_preview')}</blockquote>
+                  </button>
+                  {#if echo.matched_terms.length}
+                    <div class="knowledge-echo__terms" aria-label={t('echo.shared_ideas')}>
+                      {#each echo.matched_terms.slice(0, 3) as term}<span>{term}</span>{/each}
+                    </div>
+                  {/if}
+                  <button class="knowledge-echo__open" onclick={() => openKnowledgeEcho(echo)}>{t('echo.open')}<span>↗</span></button>
+                  <div class="knowledge-echo__feedback">
+                    <button onclick={() => markEchoHelpful(echo)}>♡ {t('echo.helpful')}</button>
+                    <button onclick={() => snoozeKnowledgeEcho(echo)}>{t('echo.later')}</button>
+                    <button onclick={() => dismissKnowledgeEcho(echo)}>{t('echo.not_related')}</button>
+                  </div>
+                  <p class="knowledge-echo__privacy"><span>●</span>{t('echo.local')}</p>
+                </div>
+              {/if}
+            {/if}
+          </aside>
+        {/if}
+      </div>
     {/if}
   </div>
 </div>
@@ -1151,6 +1391,10 @@
     </div>
     {/if}
     <label class="setting-switch"><span>{t('settings.toggle_sidebar')}</span><input type="checkbox" bind:checked={showSidebar} onchange={syncStore} /><i></i></label>
+    <label class="setting-switch"><span>{t('echo.setting')}</span><input type="checkbox" bind:checked={knowledgeEchoEnabled} onchange={handleKnowledgeEchoToggle} /><i></i></label>
+    {#if hiddenEchoCount > 0}
+      <button class="workspace-close-button echo-reset-button" onclick={resetKnowledgeEchoes}>{t('echo.restore_hidden')}<span>{hiddenEchoCount}</span></button>
+    {/if}
   </div>
 
   <div class="settings-section">
@@ -1475,12 +1719,65 @@
   .reading-context > button:last-child { margin-left: auto; }
   .reading-context button:hover, .reading-context button.active { border-color: var(--color-border); color: var(--color-primary); background: var(--color-primary-alpha-10); }
   .reading-context__home { margin-left: -8px; color: var(--color-text-secondary) !important; font-weight: 650; }
+  .md-reader__body { container-name: reading-area; container-type: inline-size; }
+  .reading-shell { width: 100%; }
+  .reading-shell > .md-reader__markdown-content { width: 100%; }
+  .knowledge-echo { position: fixed; right: 24px; bottom: 86px; z-index: 76; isolation: isolate; width: min(320px, calc(100vw - 40px)); max-height: calc(100vh - 118px); margin: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); border-radius: 19px; color: var(--color-text-primary); background: linear-gradient(145deg, color-mix(in srgb, var(--color-side-bg) 94%, transparent), color-mix(in srgb, var(--color-primary-alpha-10) 68%, var(--color-bg))); box-shadow: 0 20px 48px color-mix(in srgb, var(--color-text-primary) 13%, transparent); backdrop-filter: blur(24px) saturate(135%); animation: echoEnter .42s cubic-bezier(.16,1,.3,1); }
+  .knowledge-echo::before { position: absolute; top: -92px; right: -72px; z-index: -1; width: 210px; height: 210px; border: 1px solid color-mix(in srgb, var(--color-primary) 13%, transparent); border-radius: 50%; content: ''; box-shadow: 0 0 0 32px color-mix(in srgb, var(--color-primary) 4%, transparent), 0 0 0 66px color-mix(in srgb, var(--color-important) 3%, transparent); pointer-events: none; }
+  .knowledge-echo__toggle { display: flex; align-items: center; width: 100%; gap: 10px; padding: 13px 14px; border: 0; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; }
+  .knowledge-echo__symbol { display: grid; place-items: center; width: 31px; height: 31px; flex: none; border: 1px solid color-mix(in srgb, var(--color-primary) 26%, var(--color-border)); border-radius: 50%; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 75%, var(--color-bg)); font-size: 19px; box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--color-bg) 60%, transparent); }
+  .knowledge-echo__toggle > span:nth-child(2) { display: grid; gap: 1px; }
+  .knowledge-echo__toggle small { color: var(--color-text-gray); font-size: 7px; font-weight: 800; letter-spacing: .16em; }
+  .knowledge-echo__toggle strong { font-size: 11px; font-weight: 720; letter-spacing: .01em; }
+  .knowledge-echo__toggle > i { margin-left: auto; color: var(--color-text-gray); font: 17px/1 var(--font-family-body); font-style: normal; }
+  .knowledge-echo--collapsed { width: auto; max-width: min(260px, calc(100vw - 40px)); border-radius: 15px; box-shadow: 0 12px 30px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
+  .knowledge-echo--collapsed .knowledge-echo__toggle { min-width: 190px; padding: 9px 11px; }
+  .knowledge-echo--collapsed .knowledge-echo__symbol { width: 28px; height: 28px; font-size: 16px; }
+  .knowledge-echo--compact.knowledge-echo--collapsed { animation: echoPillIn .38s cubic-bezier(.16,1,.3,1), echoBreathe 2.2s ease .55s 1; }
+  .knowledge-echo__body { max-height: calc(100vh - 180px); padding: 2px 18px 16px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent); }
+  .knowledge-echo__meta { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 10px; color: var(--color-primary); font-size: 8px; font-weight: 780; letter-spacing: .1em; text-transform: uppercase; }
+  .knowledge-echo__meta button { display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--color-primary) 15%, var(--color-border)); border-radius: 999px; color: var(--color-text-gray); background: color-mix(in srgb, var(--color-bg) 60%, transparent); cursor: pointer; font: 8px var(--font-family-body); }
+  .knowledge-echo__meta button:hover { border-color: var(--color-primary); color: var(--color-primary); }
+  .knowledge-echo__meta i { font-style: normal; font-size: 11px; }
+  .knowledge-echo__document { display: block; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+  .knowledge-echo__document strong { display: -webkit-box; overflow: hidden; font-size: 18px; font-weight: 675; letter-spacing: -.035em; line-height: 1.16; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .knowledge-echo__document small { display: block; margin-top: 4px; color: var(--color-text-gray); font-size: 9px; }
+  .knowledge-echo__document blockquote { position: relative; margin: 14px 0 12px; padding: 0 0 0 15px; border: 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.65; }
+  .knowledge-echo__document blockquote::before { position: absolute; top: 2px; bottom: 2px; left: 0; width: 2px; border-radius: 99px; background: linear-gradient(var(--color-primary), color-mix(in srgb, var(--color-important) 70%, var(--color-primary))); content: ''; }
+  .knowledge-echo__terms { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 13px; }
+  .knowledge-echo__terms span { max-width: 140px; padding: 3px 7px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-border)); border-radius: 999px; color: var(--color-primary); background: color-mix(in srgb, var(--color-bg) 62%, transparent); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+  .knowledge-echo__open { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--color-primary) 42%, var(--color-border)); border-radius: 10px; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 74%, var(--color-bg)); cursor: pointer; font: 700 10px var(--font-family-body); transition: transform .18s ease, background .18s ease, box-shadow .18s ease; }
+  .knowledge-echo__open:hover { background: var(--color-primary-alpha-10); box-shadow: 0 9px 20px color-mix(in srgb, var(--color-primary) 11%, transparent); transform: translateY(-1px); }
+  .knowledge-echo__open span { font-size: 13px; }
+  .knowledge-echo__feedback { display: flex; align-items: center; gap: 3px; margin-top: 8px; }
+  .knowledge-echo__feedback button { padding: 5px 6px; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 8px var(--font-family-body); }
+  .knowledge-echo__feedback button:hover { color: var(--color-primary); background: var(--color-primary-alpha-10); }
+  .knowledge-echo__feedback button:last-child { margin-left: auto; }
+  .knowledge-echo__privacy { display: flex; align-items: center; gap: 5px; margin: 8px 1px 0; color: var(--color-text-gray); font-size: 7px; }
+  .knowledge-echo__privacy span { color: var(--color-success); font-size: 5px; box-shadow: 0 0 7px color-mix(in srgb, var(--color-success) 60%, transparent); }
+  .knowledge-echo__loading { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 18px; border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent); }
+  .knowledge-echo__loading span { height: 42px; border-radius: 9px; background: linear-gradient(100deg, var(--color-primary-alpha-10) 20%, color-mix(in srgb, var(--color-bg) 80%, transparent) 40%, var(--color-primary-alpha-10) 60%); background-size: 220% 100%; animation: echoShimmer 1.4s linear infinite; }
+  .knowledge-echo__loading p { grid-column: 1 / -1; margin: 5px 0 0; color: var(--color-text-gray); font-size: 9px; text-align: center; }
+  .echo-reset-button span { display: grid; place-items: center; min-width: 20px; height: 20px; border-radius: 99px; color: var(--color-primary); background: var(--color-primary-alpha-10); font-size: 9px; }
+  @keyframes echoEnter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes echoPillIn { from { opacity: 0; transform: translateY(7px) scale(.94); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes echoBreathe { 0%, 100% { box-shadow: 0 12px 30px color-mix(in srgb, var(--color-text-primary) 12%, transparent); } 45% { box-shadow: 0 12px 34px color-mix(in srgb, var(--color-primary) 27%, transparent), 0 0 0 5px color-mix(in srgb, var(--color-primary) 7%, transparent); } }
+  @keyframes echoShimmer { to { background-position: -220% 0; } }
+  @container reading-area (min-width: 1100px) {
+    .reading-context { max-width: 1160px; }
+    .reading-shell--with-echo { display: grid; grid-template-columns: minmax(0, 820px) 278px; align-items: start; width: min(1160px, calc(100% - 48px)); gap: 28px; margin: 0 auto; }
+    .reading-shell--with-echo > .md-reader__markdown-content { min-width: 0; max-width: 820px; margin: 0; padding-right: 36px; padding-left: 36px; }
+    .reading-shell--with-echo .knowledge-echo { position: sticky; top: 24px; right: auto; bottom: auto; z-index: 4; width: 278px; max-height: none; margin: 24px 0 70px; }
+    .reading-shell--with-echo .knowledge-echo__body { max-height: none; overflow: visible; }
+    .reading-shell--with-echo .knowledge-echo--collapsed { width: 210px; margin-left: auto; }
+  }
   .reading-progress { position: fixed; top: 0; left: var(--side-width, 0); z-index: 110; width: var(--progress); height: 2px; background: var(--color-primary); box-shadow: 0 0 12px color-mix(in srgb, var(--color-primary) 65%, transparent); transition: width .18s linear; }
   .app-toast { position: fixed; bottom: 28px; left: 50%; z-index: 140; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); border-radius: 11px; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-side-bg) 95%, transparent); box-shadow: 0 14px 32px color-mix(in srgb, var(--color-text-primary) 18%, transparent); font-size: 12px; transform: translateX(-50%); animation: toastIn .25s cubic-bezier(.2,.8,.2,1); backdrop-filter: blur(18px); }
   .app-toast span { color: var(--color-primary); }
   :global(mark.search-highlight) { border-radius: 3px; color: inherit; background: var(--color-mark); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mark) 55%, transparent); transition: background .7s ease, box-shadow .7s ease; }
   :global(mark.search-highlight--soft) { background: color-mix(in srgb, var(--color-mark) 28%, transparent); box-shadow: none; }
   @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
-  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--rediscover { grid-column: span 1; } .rediscovery-list { grid-template-columns: 1fr; } .rediscovery-note__main { min-height: 112px; } .reading-context { padding: 0 28px; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
-  @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 60px 28px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } }
+  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--rediscover { grid-column: span 1; } .rediscovery-list { grid-template-columns: 1fr; } .rediscovery-note__main { min-height: 112px; } .reading-context { padding: 0 28px; } .knowledge-echo { right: 18px; bottom: 78px; } .knowledge-echo__feedback { flex-wrap: wrap; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
+  @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 60px 28px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } .knowledge-echo--compact:not(.knowledge-echo--collapsed) { right: 0; bottom: 0; z-index: 105; width: 100%; max-height: min(58vh, 520px); border-radius: 22px 22px 0 0; box-shadow: 0 -18px 55px color-mix(in srgb, var(--color-text-primary) 18%, transparent); animation: echoSheetIn .34s cubic-bezier(.16,1,.3,1); } .knowledge-echo--compact:not(.knowledge-echo--collapsed) .knowledge-echo__body { max-height: calc(min(58vh, 520px) - 58px); } .knowledge-echo--collapsed { right: 18px; bottom: 78px; } }
+  @keyframes echoSheetIn { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: translateY(0); } }
 </style>

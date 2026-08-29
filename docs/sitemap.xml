@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/zh-cn/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/forgotten-note-returns/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/forgotten-note-returns/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/forgotten-note-returns/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/zh-cn/forgotten-note-returns/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/forgotten-note-returns/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/forgotten-note-returns/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/markdown-folder-knowledge-base/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/markdown-folder-knowledge-base/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/markdown-folder-knowledge-base/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/zh-cn/markdown-folder-knowledge-base/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/markdown-folder-knowledge-base/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/markdown-folder-knowledge-base/" />
+  </url>
+</urlset>

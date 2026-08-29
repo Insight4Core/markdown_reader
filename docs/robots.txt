@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://insight4core.github.io/markdown_reader/sitemap.xml
