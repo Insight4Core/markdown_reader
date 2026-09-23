@@ -12,11 +12,18 @@
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { mdRender } from '@/core/markdown';
   import { tick, onMount } from 'svelte';
+  import { fade, fly, slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import '@/style/index.less';
 
   onMount(() => {
+    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotionPreference = () => reducedMotion = motionPreference.matches;
+    updateMotionPreference();
+    motionPreference.addEventListener('change', updateMotionPreference);
     let unlistenPromise: ReturnType<typeof listen> | null = null;
     let echoResizeObserver: ResizeObserver | null = null;
+    const dayRefreshTimer = window.setInterval(() => currentDayKey = localDayKey(), 60000);
     if ('__TAURI_INTERNALS__' in window) {
       unlistenPromise = listen('sys-open-file', (event) => {
         const path = event.payload as string;
@@ -34,11 +41,24 @@
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
     document.addEventListener('click', handleMarkdownClick);
     const handleGlobalShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const editing = target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+      if (!editing && !drawerOpen && !globalSearchOpen && !newWorkspaceOpen) {
+        if (event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+          event.preventDefault();
+          void navigateReadingHistory(event.key === 'ArrowLeft' ? -1 : 1);
+        }
+        if ((event.metaKey || event.ctrlKey) && event.code === 'Backslash') {
+          event.preventDefault();
+          toggleSidebar();
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         openGlobalSearch();
       }
       if (event.key === 'Escape' && globalSearchOpen) closeGlobalSearch();
+      else if (event.key === 'Escape' && drawerOpen) drawerOpen = false;
       else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) knowledgeEchoExpanded = false;
     };
     const handleOutsideEchoClick = (event: MouseEvent) => {
@@ -60,10 +80,12 @@
       echoResizeObserver.observe(readingBody);
     });
     return () => {
+      motionPreference.removeEventListener('change', updateMotionPreference);
       window.removeEventListener('scroll', saveReadingProgress);
       document.removeEventListener('click', handleMarkdownClick);
       window.removeEventListener('keydown', handleGlobalShortcut);
       document.removeEventListener('click', handleOutsideEchoClick);
+      window.clearInterval(dayRefreshTimer);
       echoResizeObserver?.disconnect();
       unlistenPromise?.then(unlisten => unlisten());
     };
@@ -71,8 +93,15 @@
 
   let markdownHtml = $state('<div style="text-align: center; margin-top: 40vh; color: #888;">Double click anywhere or click the gear to open a markdown file.</div>');
   let filePath = $state('');
+  type ReadingVisit = { path: string; position: number; fromEcho: boolean };
+  let readingHistory = $state<ReadingVisit[]>([{ path: '', position: 0, fromEcho: false }]);
+  let readingHistoryIndex = $state(0);
+  let navigating = $state(false);
+  let navigationRequest = 0;
   
   let drawerOpen = $state(false);
+  let reducedMotion = $state(false);
+  const appearanceThemes = ['light', 'dark', 'newsprint', 'terminal', 'glass'];
   let showSidebar = $state(true);
   let currentTheme = $state('light');
   let appFont = $state('auto');
@@ -88,6 +117,10 @@
   interface RediscoveryPreference {
     snoozedUntil?: number;
     dismissed?: boolean;
+    helpfulCount?: number;
+    lastHelpfulAt?: number;
+    lastHelpfulDay?: string;
+    reflection?: string;
   }
   type RediscoveryKind = 'sleeping' | 'pinned' | 'unread';
   interface RediscoveryDocument {
@@ -97,6 +130,15 @@
     kind: RediscoveryKind;
   }
   let rediscoveryPreferences = $state<Record<string, RediscoveryPreference>>({});
+  let currentDayKey = $state(localDayKey());
+  let dailyEchoFinishedDay = $state('');
+  let dailyEchoSelections = $state<Record<string, { day: string; document: RediscoveryDocument | null; read: boolean; finished?: boolean }>>({});
+  let dailyEchoReady = $state(false);
+  let dailyEchoPreview = $state('');
+  let dailyEchoPreviewLoading = $state(false);
+  let dailyEchoReflectionOpen = $state(false);
+  let dailyEchoReflectionDraft = $state('');
+  let dailyEchoPreviewRequestId = 0;
   interface KnowledgeEcho {
     file_path: string;
     file_name: string;
@@ -122,6 +164,7 @@
   let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingScrollPosition: number | null = null;
   let pendingSearchTerm = '';
+  let pendingSearchLine = 0;
 
   let searchQuery = $state('');
   
@@ -141,6 +184,9 @@
   let isGlobalSearching = $state(false);
   let globalSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let globalSearchInput = $state<HTMLInputElement | undefined>(undefined);
+  let selectedSearchIndex = $state(0);
+  let globalSearchError = $state(false);
+  let searchReturnFocus: HTMLElement | null = null;
   let toastMessage = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   let newWorkspaceOpen = $state(false);
@@ -149,7 +195,10 @@
   let isCreatingWorkspace = $state(false);
 
   $effect(() => {
-    if (searchQuery.trim() === '') {
+    const query = searchQuery.trim();
+    const workspace = folderPath;
+    let cancelled = false;
+    if (query === '' || !workspace) {
        searchResults = [];
        isSearching = false;
        return;
@@ -160,19 +209,25 @@
     
     searchTimer = setTimeout(async () => {
        try {
-         const res = await invoke('search_content', { path: folderPath, query: searchQuery.trim() });
-         searchResults = res as SearchResult[];
+         const res = await invoke('search_content', { path: workspace, query });
+         if (!cancelled) searchResults = res as SearchResult[];
        } catch(e) {
          console.error("Search failed:", e);
-         searchResults = [];
+         if (!cancelled) searchResults = [];
        } finally {
-         isSearching = false;
+         if (!cancelled) isSearching = false;
        }
     }, 300);
+    return () => { cancelled = true; if (searchTimer) clearTimeout(searchTimer); };
   });
 
   $effect(() => {
-    if (!globalSearchOpen || globalSearchQuery.trim() === '' || !folderPath) {
+    const query = globalSearchQuery.trim();
+    const workspace = folderPath;
+    let cancelled = false;
+    selectedSearchIndex = 0;
+    globalSearchError = false;
+    if (!globalSearchOpen || query === '' || !workspace) {
       globalSearchResults = [];
       isGlobalSearching = false;
       return;
@@ -181,14 +236,16 @@
     isGlobalSearching = true;
     globalSearchTimer = setTimeout(async () => {
       try {
-        globalSearchResults = await invoke('search_content', { path: folderPath, query: globalSearchQuery.trim() }) as SearchResult[];
+        const results = await invoke('search_content', { path: workspace, query }) as SearchResult[];
+        if (!cancelled) globalSearchResults = results;
       } catch (error) {
         console.error('Global search failed:', error);
-        globalSearchResults = [];
+        if (!cancelled) { globalSearchResults = []; globalSearchError = true; }
       } finally {
-        isGlobalSearching = false;
+        if (!cancelled) isGlobalSearching = false;
       }
     }, 180);
+    return () => { cancelled = true; if (globalSearchTimer) clearTimeout(globalSearchTimer); };
   });
   let filteredFiles = $derived(folderFiles.filter(f => (searchQuery === '' || (!f.isDir && f.name.toLowerCase().includes(searchQuery.toLowerCase())))));
   let visibleTreeFiles = $derived(filteredFiles.filter(item => {
@@ -203,7 +260,16 @@
   let maxDepth = $state(2);
   let sidebarWidth = $state(260);
   let markdownFiles = $derived(folderFiles.filter(file => !file.isDir));
-  let workspaceName = $derived(folderPath.split(/[/\\]/).filter(Boolean).pop() || 'Pyrus');
+  let workspaceName = $derived(folderPath.split(/[/\\]/).filter(Boolean).pop() || t('misc.reader_title'));
+
+  $effect(() => {
+    const appTitle = t('misc.reader_title');
+    if (typeof document !== 'undefined') document.title = appTitle;
+    if (typeof window !== 'undefined' && !folderPath && !filePath && '__TAURI_INTERNALS__' in window) {
+      void getCurrentWindow().setTitle(appTitle);
+    }
+  });
+
   let recentDocuments = $derived(recentFiles.map(path => markdownFiles.find(file => file.path === path)).filter(Boolean));
   let pinnedDocuments = $derived(pinnedFiles.map(path => markdownFiles.find(file => file.path === path)).filter(Boolean));
   let continueDocuments = $derived(
@@ -213,9 +279,25 @@
       .filter(Boolean)
       .slice(0, 5)
   );
-  let rediscoveryDocuments = $derived(buildRediscoveryDocuments());
+  let dailyEcho = $derived(buildDailyEcho());
+  $effect(() => {
+    if (!dailyEchoReady || !folderPath || markdownFiles.length === 0) return;
+    const prefix = folderPath.replace(/[\\/]+$/, '') + '/';
+    if (markdownFiles.some(file => !file.path.replace(/\\/g, '/').startsWith(prefix.replace(/\\/g, '/')))) return;
+    const saved = dailyEchoSelections[folderPath];
+    if (saved?.day === currentDayKey && (!saved.document || saved.document.path.replace(/\\/g, '/').startsWith(prefix.replace(/\\/g, '/')))) return;
+    dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { day: currentDayKey, document: selectDailyEcho(), read: false } };
+    void syncStore();
+  });
   let hiddenRediscoveryCount = $derived(markdownFiles.filter(file => rediscoveryPreferences[file.path]?.dismissed).length);
   let hiddenEchoCount = $derived(Object.values(echoPreferences).filter(preference => preference.dismissed).length);
+
+  $effect(() => {
+    const path = dailyEcho?.path || '';
+    dailyEchoReflectionOpen = false;
+    dailyEchoReflectionDraft = path ? (rediscoveryPreferences[path]?.reflection || '') : '';
+    void loadDailyEchoPreview(path);
+  });
   
   let headers = $state<{id: string, text: string, level: number}[]>([]);
   let activeHeaderId = $state('');
@@ -231,6 +313,8 @@
     await store.set('filePath', filePath);
     await store.set('maxDepth', maxDepth);
     await store.set('sidebarWidth', sidebarWidth);
+    await store.set('showSidebar', showSidebar);
+    await store.set('sidebarTab', sidebarTab);
     await store.set('locale', i18nState.locale);
     await store.set('appTheme', currentTheme);
     await store.set('appFont', appFont);
@@ -239,6 +323,8 @@
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
     await store.set('rediscoveryPreferences', rediscoveryPreferences);
+    await store.set('dailyEchoFinishedDay', dailyEchoFinishedDay);
+    await store.set('dailyEchoSelections', dailyEchoSelections);
     await store.set('echoPreferences', echoPreferences);
     await store.set('knowledgeEchoEnabled', knowledgeEchoEnabled);
     await store.save();
@@ -297,6 +383,10 @@
 
         const savedWidth = await store.get<{value?: number} | number>('sidebarWidth');
         if (savedWidth) sidebarWidth = typeof savedWidth === 'number' ? savedWidth : (savedWidth.value || sidebarWidth);
+        const savedSidebar = await store.get('showSidebar');
+        if (typeof savedSidebar === 'boolean') showSidebar = savedSidebar;
+        const savedSidebarTab = await store.get('sidebarTab');
+        if (savedSidebarTab === 'files' || savedSidebarTab === 'toc') sidebarTab = savedSidebarTab;
 
         const savedFolderPath = await store.get<{value?: string} | string>('folderPath');
         if (savedFolderPath) {
@@ -315,6 +405,10 @@
         if (savedProgress && typeof savedProgress === 'object') readingProgress = savedProgress;
         const savedRediscoveryPreferences = await store.get<Record<string, RediscoveryPreference>>('rediscoveryPreferences');
         if (savedRediscoveryPreferences && typeof savedRediscoveryPreferences === 'object') rediscoveryPreferences = savedRediscoveryPreferences;
+        const savedDailyEchoFinishedDay = await store.get<string>('dailyEchoFinishedDay');
+        if (typeof savedDailyEchoFinishedDay === 'string') dailyEchoFinishedDay = savedDailyEchoFinishedDay;
+        const savedSelections = await store.get('dailyEchoSelections');
+        if (savedSelections && typeof savedSelections === 'object') dailyEchoSelections = savedSelections;
         const savedEchoPreferences = await store.get<Record<string, EchoPreference>>('echoPreferences');
         if (savedEchoPreferences && typeof savedEchoPreferences === 'object') echoPreferences = savedEchoPreferences;
         const savedKnowledgeEchoEnabled = await store.get('knowledgeEchoEnabled') as boolean | null;
@@ -332,6 +426,7 @@
         console.error("[Store] Failed to load settings:", e);
       } finally {
         if (store) isStoreReady = true;
+        dailyEchoReady = true;
       }
     }
     initSettings();
@@ -357,18 +452,18 @@
     try {
       const update = await check();
       if (update && update.available) {
-        const yes = await ask(`${t('update.new_version')} ${update.version}！\n\n${t('update.content')}: ${update.body || t('update.regular')}\n\n${t('update.prompt')}？`, { title: `Pyrus ${t('update.title')}`, kind: 'info' });
+        const yes = await ask(`${t('update.new_version')} ${update.version}！\n\n${t('update.content')}: ${update.body || t('update.regular')}\n\n${t('update.prompt')}？`, { title: `${t('misc.reader_title')} ${t('update.title')}`, kind: 'info' });
         if (yes) {
           await update.downloadAndInstall();
           await relaunch();
         }
       } else if (manual) {
-        await ask(t('update.up_to_date'), { title: `Pyrus ${t('update.title')}`, kind: 'info' });
+        await ask(t('update.up_to_date'), { title: `${t('misc.reader_title')} ${t('update.title')}`, kind: 'info' });
       }
     } catch (e: any) {
       console.warn("Auto-updater check failed:", e);
       if (manual) {
-        await ask(`${t('update.error')} ${e.message || String(e)}`, { title: `Pyrus ${t('update.title')}`, kind: 'error' });
+        await ask(`${t('update.error')} ${e.message || String(e)}`, { title: `${t('misc.reader_title')} ${t('update.title')}`, kind: 'error' });
       }
     } finally {
       isCheckingUpdate = false;
@@ -385,8 +480,10 @@
   
   async function loadContent() {
       if (!filePath) return;
+      const requestedPath = filePath;
       try {
-        const content = await readTextFile(filePath);
+        const content = await readTextFile(requestedPath);
+        if (requestedPath !== filePath) return;
         
         const MD_PLUGINS = [
           'Emoji', 'Sub', 'Sup', 'Ins', 'Abbr', 'Katex', 'Mermaid',
@@ -395,7 +492,9 @@
         
         markdownHtml = mdRender(content, { theme: 'light', plugins: MD_PLUGINS });
         
-        tick().then(() => {
+        await tick();
+        if (requestedPath !== filePath) return;
+        {
            const article = document.querySelector('.md-reader__markdown-content');
            if (article) {
               const hElements = Array.from(article.querySelectorAll('h1, h2, h3, h4, h5, h6')) as HTMLElement[];
@@ -415,15 +514,21 @@
               requestAnimationFrame(updateActiveHeader);
            }
            if (pendingSearchTerm) {
-             scrollToSearchMatch(pendingSearchTerm);
+             scrollToSearchMatch(pendingSearchTerm, pendingSearchLine);
              pendingSearchTerm = '';
+             pendingSearchLine = 0;
+             pendingScrollPosition = null;
            } else if (pendingScrollPosition !== null) {
              const position = pendingScrollPosition;
              pendingScrollPosition = null;
-             requestAnimationFrame(() => window.scrollTo({ top: position, behavior: 'auto' }));
+             await new Promise<void>(resolve => requestAnimationFrame(() => {
+               if (requestedPath === filePath) window.scrollTo({ top: position, behavior: 'instant' });
+               resolve();
+             }));
            }
-        });
+        }
       } catch (e: any) {
+        if (requestedPath !== filePath) return;
         markdownHtml = `<div style="text-align: center; margin-top: 40vh; color: red;">读取文件失败: <br/>${e.toString()}</div>`;
         console.error("loadContent Error:", e);
       }
@@ -463,6 +568,9 @@
     });
     
     if (selected) {
+      saveReadingProgress();
+      resetReadingHistory();
+      folderFiles = [];
       folderPath = selected as string;
       filePath = '';
       markdownHtml = '';
@@ -500,6 +608,8 @@
       await mkdir(workspacePath);
       const welcomePath = await join(workspacePath, 'Welcome.md');
       await writeTextFile(welcomePath, createWelcomeNote(name));
+      saveReadingProgress();
+      resetReadingHistory();
       folderPath = workspacePath;
       folderFiles = await scanFolder(folderPath, 1);
       filePath = '';
@@ -519,7 +629,7 @@
 
   function createWelcomeNote(name: string) {
     if (i18nState.locale === 'zh') {
-      return `# 欢迎来到 ${name}\n\n这里是你的私密阅读空间。所有内容都保存在这个文件夹和你的设备上。\n\n## 从这里开始\n\n- 把 Markdown 文件放进这个文件夹，Pyrus 会自动发现它们。\n- 点击 ✦ 固定重要笔记。\n- 随时按下 **⌘K**，搜索你的整个知识库。\n\n> Pyrus 会记住你的阅读位置，让你每次都能从上次停下的地方继续。\n\n开始阅读吧。\n`;
+      return `# 欢迎来到 ${name}\n\n这里是你的私密阅读空间。所有内容都保存在这个文件夹和你的设备上。\n\n## 从这里开始\n\n- 把 Markdown 文件放进这个文件夹，知返会自动发现它们。\n- 点击 ✦ 固定重要笔记。\n- 随时按下 **⌘K**，搜索你的整个知识库。\n\n> 知返会记住你的阅读位置，让你每次都能从上次停下的地方继续。\n\n开始阅读吧。\n`;
     }
     return `# Welcome to ${name}\n\nThis is your private reading space. Everything stays in this folder, on your device.\n\n## Start here\n\n- Add Markdown files to this folder and Pyrus will find them automatically.\n- Pin an important note with the ✦ button.\n- Press **⌘K** anytime to search your knowledge base.\n\n> Pyrus remembers where you stopped reading, so you can always pick up where you left off.\n\nHappy reading.\n`;
   }
@@ -542,24 +652,84 @@
     }
   }
 
-  async function openSpecificFile(path: string) {
+  function rememberCurrentVisit() {
+    if (navigating) return;
+    saveReadingProgress();
+    readingHistory = readingHistory.map((visit, index) => index === readingHistoryIndex
+      ? { ...visit, position: window.scrollY } : visit);
+  }
+
+  function resetReadingHistory() {
+    navigationRequest += 1;
+    navigating = false;
+    readingHistory = [{ path: '', position: 0, fromEcho: false }];
+    readingHistoryIndex = 0;
+  }
+
+  function addReadingVisit(path: string, fromEcho = false) {
+    readingHistory = [...readingHistory.slice(0, readingHistoryIndex + 1), { path, position: 0, fromEcho }];
+    readingHistoryIndex = readingHistory.length - 1;
+  }
+
+  async function navigateReadingHistory(direction: number) {
+    if (navigating) return;
+    const index = readingHistoryIndex + direction;
+    const visit = readingHistory[index];
+    if (!visit) return;
+    rememberCurrentVisit();
+    readingHistoryIndex = index;
+    pendingSearchTerm = '';
+    if (visit.path) await openSpecificFile(visit.path, { history: true, position: visit.position });
+    else {
+      openWorkspaceHome(true);
+      await tick();
+      window.scrollTo({ top: visit.position, behavior: 'instant' });
+    }
+  }
+
+  function selectSidebarTab(tab: 'files' | 'toc') {
+    sidebarTab = tab;
+    void syncStore();
+  }
+
+  function toggleSidebar() {
+    showSidebar = !showSidebar;
+    void syncStore();
+  }
+
+  async function openSpecificFile(path: string, options: { history?: boolean; position?: number; fromEcho?: boolean } = {}) {
     if (!path) return;
+    if (!options.history) {
+      rememberCurrentVisit();
+      if (path !== filePath) addReadingVisit(path, options.fromEcho);
+    }
+    const request = ++navigationRequest;
+    navigating = true;
     if (compactEchoMode) knowledgeEchoExpanded = false;
     filePath = path;
-    getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || 'Pyrus');
-    sidebarTab = 'toc'; // 需求：点击后自动跳转大纲模式
+    getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || t('misc.reader_title'));
     recentFiles = [path, ...recentFiles.filter(item => item !== path)].slice(0, 8);
-    pendingScrollPosition = readingProgress[path]?.position ?? 0;
+    pendingScrollPosition = options.position ?? readingProgress[path]?.position ?? 0;
     await loadContent();
+    if (request !== navigationRequest) return;
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (request !== navigationRequest) return;
+    navigating = false;
+    const todaySelection = dailyEchoSelections[folderPath];
+    if (todaySelection?.day === currentDayKey && todaySelection.document?.path === path) {
+      dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { ...todaySelection, read: true } };
+    }
     void loadKnowledgeEchoes(path);
     
     syncStore();
 
     if (unwatch) unwatch();
     try {
-      unwatch = await watch(filePath, () => {
-        loadContent();
+      const stopWatching = await watch(path, () => {
+        if (filePath === path) void loadContent();
       }, { delayMs: 100 });
+      if (request === navigationRequest) unwatch = stopWatching;
+      else stopWatching();
     } catch (e) {
       console.warn("Watch file failed:", e);
     }
@@ -642,7 +812,7 @@
       openedCount: (echoPreferences[echoPreferenceKey(filePath, echo.file_path)]?.openedCount || 0) + 1,
       lastOpenedAt: Date.now()
     });
-    await openSpecificFile(echo.file_path);
+    await openSpecificFile(echo.file_path, { fromEcho: true });
   }
 
   function markEchoHelpful(echo: KnowledgeEcho) {
@@ -710,7 +880,7 @@
   }
 
   function saveReadingProgress() {
-    if (!filePath) return;
+    if (!filePath || navigating) return;
     updateActiveHeader();
     readingProgress = {
       ...readingProgress,
@@ -722,6 +892,7 @@
 
   function openSearchResult(result: SearchResult, term = searchQuery) {
     pendingSearchTerm = term.trim();
+    pendingSearchLine = result.line_number;
     openSpecificFile(result.file_path);
   }
 
@@ -731,13 +902,28 @@
       return;
     }
     globalSearchOpen = true;
+    searchReturnFocus = document.activeElement as HTMLElement;
     tick().then(() => globalSearchInput?.focus());
   }
 
   function closeGlobalSearch() {
     globalSearchOpen = false;
-    globalSearchQuery = '';
-    globalSearchResults = [];
+    searchReturnFocus?.focus();
+  }
+
+  function handleSearchKeys(event: KeyboardEvent) {
+    if (event.isComposing || isGlobalSearching || globalSearchError) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const count = globalSearchResults.length;
+      if (!count) return;
+      selectedSearchIndex = (selectedSearchIndex + (event.key === 'ArrowDown' ? 1 : -1) + count) % count;
+      void tick().then(() => document.getElementById(`search-result-${selectedSearchIndex}`)?.scrollIntoView({ block: 'nearest' }));
+    } else if (event.key === 'Enter' && globalSearchResults[selectedSearchIndex]) {
+      event.preventDefault();
+      openSearchResult(globalSearchResults[selectedSearchIndex], globalSearchQuery);
+      closeGlobalSearch();
+    }
   }
 
   function updateActiveHeader() {
@@ -755,10 +941,13 @@
     activeHeaderId = activeHeading.id;
   }
 
-  function scrollToSearchMatch(term: string) {
+  function scrollToSearchMatch(term: string, line = 0) {
     const article = document.querySelector('.md-reader__markdown-content');
     if (!article || !term) return;
-    const target = Array.from(article.querySelectorAll('p, li, blockquote, pre, td, h1, h2, h3, h4, h5, h6'))
+    const mapped = Array.from(article.querySelectorAll<HTMLElement>('[data-source-start]'))
+      .filter(element => Number(element.dataset.sourceStart) <= line && Number(element.dataset.sourceEnd) >= line)
+      .sort((a, b) => (Number(a.dataset.sourceEnd) - Number(a.dataset.sourceStart)) - (Number(b.dataset.sourceEnd) - Number(b.dataset.sourceStart)));
+    const target = mapped[0] || Array.from(article.querySelectorAll('p, li, blockquote, pre, td, h1, h2, h3, h4, h5, h6'))
       .find(element => element.textContent?.toLocaleLowerCase().includes(term.toLocaleLowerCase()));
     if (!target) return;
     highlightSearchMatch(target, term);
@@ -793,7 +982,14 @@
     return Math.min(100, Math.round((progress.position / Math.max(progress.total || 1, 1)) * 100));
   }
 
-  function buildRediscoveryDocuments(): RediscoveryDocument[] {
+  function buildDailyEcho(): RediscoveryDocument | null {
+    const selection = dailyEchoSelections[folderPath];
+    if (selection?.day !== currentDayKey || selection.finished) return null;
+    const doc = selection.document;
+    return doc && markdownFiles.some(file => file.path === doc.path) ? doc : null;
+  }
+
+  function selectDailyEcho(): RediscoveryDocument | null {
     const now = Date.now();
     const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
     const recentSet = new Set(recentFiles.slice(0, 3));
@@ -801,53 +997,36 @@
       const preference = rediscoveryPreferences[file.path];
       return !preference?.dismissed && (!preference?.snoozedUntil || preference.snoozedUntil <= now);
     });
-    const selected: RediscoveryDocument[] = [];
-    const selectedPaths = new Set<string>();
-
-    const addFirst = (items: typeof candidates, kind: RediscoveryKind) => {
-      const item = items.find(candidate => !selectedPaths.has(candidate.path));
-      if (!item) return;
-      selected.push({ ...item, kind });
-      selectedPaths.add(item.path);
-    };
-
     const oldestFirst = (a: typeof candidates[number], b: typeof candidates[number]) =>
       (readingProgress[a.path]?.updatedAt || 0) - (readingProgress[b.path]?.updatedAt || 0);
-    const dailyRank = (path: string) => stableHash(`${new Date().toISOString().slice(0, 10)}:${path}`);
+    const dailyRank = (path: string) => stableHash(`${currentDayKey}:${path}`);
+    const pickForToday = (items: typeof candidates, kind: RediscoveryKind) => {
+      const item = [...items].sort((a, b) => dailyRank(a.path) - dailyRank(b.path))[0];
+      return item ? { ...item, kind } : null;
+    };
 
-    addFirst(
-      candidates
-        .filter(file => readingProgress[file.path]?.updatedAt && readingProgress[file.path].updatedAt <= sevenDaysAgo)
-        .sort(oldestFirst),
-      'sleeping'
-    );
-    addFirst(
-      candidates
-        .filter(file => pinnedFiles.includes(file.path) && !recentSet.has(file.path))
-        .sort(oldestFirst),
-      'pinned'
-    );
-    addFirst(
-      candidates
-        .filter(file => !readingProgress[file.path] && !recentSet.has(file.path))
-        .sort((a, b) => dailyRank(a.path) - dailyRank(b.path)),
-      'unread'
-    );
+    const sleeping = candidates
+      .filter(file => readingProgress[file.path]?.updatedAt && readingProgress[file.path].updatedAt <= sevenDaysAgo && !recentSet.has(file.path))
+      .sort(oldestFirst)
+      .slice(0, 12);
+    const pinned = candidates
+      .filter(file => pinnedFiles.includes(file.path) && !recentSet.has(file.path))
+      .sort(oldestFirst)
+      .slice(0, 12);
+    const unread = candidates.filter(file => !readingProgress[file.path] && !recentSet.has(file.path));
 
-    const fallback = candidates
-      .filter(file => !recentSet.has(file.path) && !selectedPaths.has(file.path))
-      .sort((a, b) => dailyRank(a.path) - dailyRank(b.path));
-    for (const file of fallback) {
-      if (selected.length >= 3) break;
-      const kind: RediscoveryKind = pinnedFiles.includes(file.path)
-        ? 'pinned'
-        : readingProgress[file.path]
-          ? 'sleeping'
-          : 'unread';
-      selected.push({ ...file, kind });
-      selectedPaths.add(file.path);
-    }
-    return selected.slice(0, 3);
+    return pickForToday(sleeping, 'sleeping')
+      || pickForToday(pinned, 'pinned')
+      || pickForToday(unread, 'unread')
+      || pickForToday(candidates.filter(file => !recentSet.has(file.path)), 'sleeping')
+      || null;
+  }
+
+  function localDayKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   function stableHash(value: string) {
@@ -865,11 +1044,89 @@
     return `${days}${t('rediscovery.reason_days')}`;
   }
 
+  async function loadDailyEchoPreview(path: string) {
+    const requestId = ++dailyEchoPreviewRequestId;
+    dailyEchoPreview = '';
+    if (!path) {
+      dailyEchoPreviewLoading = false;
+      return;
+    }
+    dailyEchoPreviewLoading = true;
+    try {
+      const source = await readTextFile(path);
+      if (requestId === dailyEchoPreviewRequestId) dailyEchoPreview = extractDailyEchoPreview(source);
+    } catch (error) {
+      console.warn('Failed to load daily echo preview:', error);
+    } finally {
+      if (requestId === dailyEchoPreviewRequestId) dailyEchoPreviewLoading = false;
+    }
+  }
+
+  function extractDailyEchoPreview(source: string) {
+    const withoutFrontmatter = source.replace(/^---\s*[\s\S]*?\n---\s*/m, '');
+    const paragraphs = withoutFrontmatter
+      .replace(/```[\s\S]*?```/g, ' ')
+      .split(/\n\s*\n/)
+      .map(block => block
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/^\s*[-*+]\s+/gm, '')
+        .replace(/^\s*>\s?/gm, '')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/[*_`~]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim())
+      .filter(block => block.length >= 28 && !block.startsWith('|'));
+    const preview = paragraphs[0] || '';
+    return preview.length > 220 ? `${preview.slice(0, 217).trimEnd()}…` : preview;
+  }
+
+  function openDailyEchoReflection(document: RediscoveryDocument) {
+    dailyEchoReflectionDraft = rediscoveryPreferences[document.path]?.reflection || '';
+    dailyEchoReflectionOpen = true;
+  }
+
+  function markDailyEchoHelpful(document: RediscoveryDocument) {
+    const preference = rediscoveryPreferences[document.path] || {};
+    const today = currentDayKey;
+    rediscoveryPreferences = {
+      ...rediscoveryPreferences,
+      [document.path]: {
+        ...preference,
+        helpfulCount: (preference.helpfulCount || 0) + (preference.lastHelpfulDay === today ? 0 : 1),
+        lastHelpfulAt: Date.now(),
+        lastHelpfulDay: today
+      }
+    };
+    toastMessage = t('daily_echo.helpful_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+  }
+
+  function saveDailyEchoReflection(document: RediscoveryDocument) {
+    const preference = rediscoveryPreferences[document.path] || {};
+    rediscoveryPreferences = {
+      ...rediscoveryPreferences,
+      [document.path]: {
+        ...preference,
+        reflection: dailyEchoReflectionDraft.trim() || undefined
+      }
+    };
+    dailyEchoReflectionOpen = false;
+    toastMessage = t('daily_echo.context_saved_toast');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
+    syncStore();
+  }
+
   function snoozeRediscovery(path: string, days: number) {
     rediscoveryPreferences = {
       ...rediscoveryPreferences,
       [path]: { ...rediscoveryPreferences[path], snoozedUntil: Date.now() + days * 86400000 }
     };
+    dailyEchoFinishedDay = currentDayKey;
+    finishDailyEcho();
     toastMessage = days === 1 ? t('rediscovery.skipped_toast') : t('rediscovery.snoozed_toast');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastMessage = '', 2300);
@@ -881,14 +1138,34 @@
       ...rediscoveryPreferences,
       [path]: { ...rediscoveryPreferences[path], dismissed: true }
     };
+    dailyEchoFinishedDay = currentDayKey;
+    finishDailyEcho();
     toastMessage = t('rediscovery.dismissed_toast');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastMessage = '', 2300);
     syncStore();
   }
 
+  function finishDailyEcho() {
+    const selection = dailyEchoSelections[folderPath];
+    if (selection) dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { ...selection, finished: true } };
+  }
+
   function resetRediscovery() {
-    rediscoveryPreferences = {};
+    const selection = dailyEchoSelections[folderPath];
+    if (selection) dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { ...selection, finished: false } };
+    rediscoveryPreferences = Object.fromEntries(
+      Object.entries(rediscoveryPreferences).flatMap(([path, preference]) => {
+        const history: RediscoveryPreference = {
+          helpfulCount: preference.helpfulCount,
+          lastHelpfulAt: preference.lastHelpfulAt,
+          lastHelpfulDay: preference.lastHelpfulDay,
+          reflection: preference.reflection
+        };
+        return Object.values(history).some(value => value !== undefined) ? [[path, history]] : [];
+      })
+    );
+    dailyEchoFinishedDay = '';
     toastMessage = t('rediscovery.reset_toast');
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastMessage = '', 2300);
@@ -905,8 +1182,15 @@
     return `${Math.floor(elapsedMinutes / 1440)}${t('workspace.days_ago')}`;
   }
 
-  function openWorkspaceHome() {
-    if (!folderPath) return;
+  function openWorkspaceHome(fromHistory = false) {
+    if (!folderPath && !fromHistory) return;
+    if (!fromHistory) {
+      rememberCurrentVisit();
+      if (filePath) addReadingVisit('');
+    }
+    navigationRequest += 1;
+    navigating = false;
+    if (unwatch) { unwatch(); unwatch = null; }
     echoRequestId += 1;
     knowledgeEchoes = [];
     knowledgeEchoLoading = false;
@@ -914,13 +1198,14 @@
     markdownHtml = '';
     headers = [];
     activeHeaderId = '';
-    sidebarTab = 'files';
     getCurrentWindow().setTitle(workspaceName);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!fromHistory) window.scrollTo({ top: 0, behavior: 'instant' });
     syncStore();
   }
 
   function closeWorkspace() {
+    saveReadingProgress();
+    resetReadingHistory();
     if (unwatch) {
       unwatch();
       unwatch = null;
@@ -935,14 +1220,15 @@
     activeHeaderId = '';
     markdownHtml = '';
     drawerOpen = false;
-    getCurrentWindow().setTitle('Pyrus');
+    getCurrentWindow().setTitle(t('misc.reader_title'));
     window.scrollTo({ top: 0, behavior: 'auto' });
     syncStore();
   }
 
   async function sendFeedback() {
     const title = encodeURIComponent('[Feedback] ');
-    const body = encodeURIComponent('## What would make Pyrus better?\n\n\n## Context (optional)\n- OS:\n- Pyrus version:');
+    const productName = t('misc.reader_title');
+    const body = encodeURIComponent(`## What would make ${productName} better?\n\n\n## Context (optional)\n- OS:\n- ${productName} version:`);
     try {
       await openUrl(`https://github.com/Insight4Core/markdown_reader/issues/new?title=${title}&body=${body}`);
     } catch (error) {
@@ -1041,21 +1327,21 @@
 <div class="md-reader" style="--side-width: {sidebarWidth}px;">
   <div class="md-reader__side">
     {#if folderPath}
-      <button class="workspace-nav" onclick={openWorkspaceHome} aria-label={t('workspace.home')}>
+      <button class="workspace-nav" onclick={() => openWorkspaceHome()} aria-label={t('workspace.home')}>
         <span class="workspace-nav__mark">✦</span>
-        <span><small>PYRUS</small><strong>{workspaceName}</strong></span>
+        <span><small>{t('misc.reader_title')}</small><strong>{workspaceName}</strong></span>
         <span class="workspace-nav__arrow">↗</span>
       </button>
     {:else}
       <button class="workspace-nav workspace-nav--app" onclick={openFolder} aria-label={t('workspace.open_folder')}>
         <span class="workspace-nav__mark">✦</span>
-        <span><small>PYRUS</small><strong>Reading space</strong></span>
+        <span><small>{t('misc.reader_title')}</small><strong>Reading space</strong></span>
         <span class="workspace-nav__arrow">+</span>
       </button>
     {/if}
-    <div class="sidebar-tabs">
-      <button class={sidebarTab === 'files' ? 'active' : ''} onclick={() => sidebarTab = 'files'}>{t('sidebar.files')}</button>
-      <button class={sidebarTab === 'toc' ? 'active' : ''} onclick={() => sidebarTab = 'toc'}>{t('sidebar.toc')}</button>
+    <div class="sidebar-tabs" class:sidebar-tabs--toc={sidebarTab === 'toc'}>
+      <button aria-pressed={sidebarTab === 'files'} class={sidebarTab === 'files' ? 'active' : ''} onclick={() => selectSidebarTab('files')}>{t('sidebar.files')}</button>
+      <button aria-pressed={sidebarTab === 'toc'} class={sidebarTab === 'toc' ? 'active' : ''} onclick={() => selectSidebarTab('toc')}>{t('sidebar.toc')}</button>
     </div>
     
     <div class="sidebar-content">
@@ -1132,6 +1418,18 @@
   </div>
 
   <div class="md-reader__body">
+    <nav class="reading-toolbar" aria-label={t('navigation.label')}>
+      <button class="reading-toolbar__sidebar" aria-label={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} title={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} aria-pressed={showSidebar} onclick={toggleSidebar}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M5.5 8h1M5.5 11h1"/></svg>
+      </button>
+      <span class="reading-toolbar__divider" aria-hidden="true"></span>
+      <button disabled={navigating || readingHistoryIndex === 0} aria-label={t('navigation.back')} title={t('navigation.back') + ' · Alt + ←'} onclick={() => navigateReadingHistory(-1)}>←</button>
+      <button disabled={navigating || readingHistoryIndex >= readingHistory.length - 1} aria-label={t('navigation.forward')} title={t('navigation.forward') + ' · Alt + →'} onclick={() => navigateReadingHistory(1)}>→</button>
+      <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
+      {#if readingHistory[readingHistoryIndex]?.fromEcho && readingHistoryIndex > 0}
+        <button class="reading-toolbar__return" disabled={navigating} onclick={() => navigateReadingHistory(-1)}>{t('navigation.return_reading')}</button>
+      {/if}
+    </nav>
     {#if !filePath}
       <div class:workspace-home={Boolean(folderPath)} class="welcome">
         <div class="welcome__orb welcome__orb--one"></div>
@@ -1142,35 +1440,60 @@
           <h2>{workspaceName}</h2>
           <p class="welcome__subtitle">{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
           <div class="workspace-grid">
-            <section class="workspace-card workspace-card--rediscover">
-              <div class="rediscovery-heading">
-                <div class="workspace-card__heading"><span>◌</span><h3>{t('rediscovery.title')}</h3></div>
-                <span class="rediscovery-heading__local">{t('rediscovery.local')}</span>
-              </div>
-              <p class="rediscovery-intro">{t('rediscovery.subtitle')}</p>
-              {#if rediscoveryDocuments.length}
-                <div class="rediscovery-list">
-                  {#each rediscoveryDocuments as doc}
-                    <article class="rediscovery-note">
-                      <button class="rediscovery-note__main" onclick={() => openSpecificFile(doc.path)}>
-                        <small>{rediscoveryReason(doc)}</small>
-                        <strong>{doc.name}</strong>
-                        <span>{doc.path.replace(folderPath, '').replace(/^[/\\]/, '')}</span>
-                        <i>→</i>
-                      </button>
-                      <details class="rediscovery-note__menu">
-                        <summary aria-label={t('rediscovery.more')}>•••</summary>
-                        <div>
-                          <button onclick={() => snoozeRediscovery(doc.path, 1)}>{t('rediscovery.skip')}</button>
-                          <button onclick={() => snoozeRediscovery(doc.path, 30)}>{t('rediscovery.in_30_days')}</button>
-                          <button onclick={() => dismissRediscovery(doc.path)}>{t('rediscovery.dismiss')}</button>
-                        </div>
-                      </details>
-                    </article>
-                  {/each}
+            <section class="workspace-card workspace-card--daily-echo">
+              <div class="daily-echo__heading">
+                <div>
+                  <span class="daily-echo__date">{t('daily_echo.eyebrow')}</span>
+                  <h3>{t('daily_echo.title')}</h3>
                 </div>
+                <span class="daily-echo__local"><i>●</i>{t('rediscovery.local')}</span>
+              </div>
+              {#if dailyEcho}
+                <article class="daily-echo">
+                  <div class="daily-echo__content">
+                    <p class="daily-echo__reason">{#if dailyEchoSelections[folderPath]?.read}✓ {t('daily_echo.read')}{:else}{rediscoveryReason(dailyEcho)}{/if}</p>
+                    <button class="daily-echo__document" onclick={() => openSpecificFile(dailyEcho.path)}>
+                      <strong>{dailyEcho.name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
+                      {#if dailyEchoPreviewLoading}
+                        <span class="daily-echo__preview daily-echo__preview--loading"></span>
+                      {:else if dailyEchoPreview}
+                        <blockquote>“{dailyEchoPreview}”</blockquote>
+                      {:else}
+                        <blockquote>{t('daily_echo.no_preview')}</blockquote>
+                      {/if}
+                    </button>
+                    <p class="daily-echo__path">{dailyEcho.path.replace(folderPath, '').replace(/^[/\\]/, '')}</p>
+                  </div>
+                  <div class="daily-echo__actions">
+                    <button class="daily-echo__open" onclick={() => openSpecificFile(dailyEcho.path)}>{t('daily_echo.open')}<span>→</span></button>
+                    <button class:daily-echo__helpful--saved={rediscoveryPreferences[dailyEcho.path]?.lastHelpfulDay === currentDayKey} class="daily-echo__helpful" onclick={() => markDailyEchoHelpful(dailyEcho)}>
+                      {rediscoveryPreferences[dailyEcho.path]?.lastHelpfulDay === currentDayKey ? '✓ ' + t('daily_echo.helpful_saved') : '♡ ' + t('daily_echo.helpful')}
+                    </button>
+                    {#if rediscoveryPreferences[dailyEcho.path]?.lastHelpfulDay === currentDayKey}
+                      <button class="daily-echo__add-context" onclick={() => openDailyEchoReflection(dailyEcho)}>{t('daily_echo.add_context')}</button>
+                    {/if}
+                    <details class="daily-echo__menu">
+                      <summary aria-label={t('rediscovery.more')}>•••</summary>
+                      <div>
+                        <button onclick={() => snoozeRediscovery(dailyEcho.path, 1)}>{t('daily_echo.tomorrow')}</button>
+                        <button onclick={() => snoozeRediscovery(dailyEcho.path, 30)}>{t('rediscovery.in_30_days')}</button>
+                        <button onclick={() => dismissRediscovery(dailyEcho.path)}>{t('rediscovery.dismiss')}</button>
+                      </div>
+                    </details>
+                  </div>
+                  {#if dailyEchoReflectionOpen}
+                    <div class="daily-echo__reflection" transition:slide={{ duration: reducedMotion ? 0 : 220, easing: cubicOut }}>
+                      <label for="daily-echo-reflection">{t('daily_echo.reflection_label')}</label>
+                      <textarea id="daily-echo-reflection" bind:value={dailyEchoReflectionDraft} maxlength="240" placeholder={t('daily_echo.reflection_placeholder')}></textarea>
+                      <div>
+                        <button onclick={() => dailyEchoReflectionOpen = false}>{t('workspace.cancel')}</button>
+                        <button class="daily-echo__reflection-save" onclick={() => saveDailyEchoReflection(dailyEcho)}>{t('daily_echo.save')}</button>
+                      </div>
+                    </div>
+                  {/if}
+                </article>
               {:else}
-                <p class="workspace-card__empty rediscovery-empty">{t('rediscovery.empty')}</p>
+                <p class="workspace-card__empty daily-echo__empty">{dailyEchoSelections[folderPath]?.day === currentDayKey && dailyEchoSelections[folderPath]?.finished ? t('daily_echo.done') : t('daily_echo.empty')}</p>
               {/if}
               {#if hiddenRediscoveryCount > 0}
                 <button class="rediscovery-reset" onclick={resetRediscovery}>{t('rediscovery.restore')} ({hiddenRediscoveryCount})</button>
@@ -1209,7 +1532,7 @@
           </div>
           <button class="workspace-change" onclick={openFolder}>{t('workspace.change_folder')}</button>
         {:else}
-          <p class="welcome__eyebrow">PYRUS / READING SPACE</p>
+          <p class="welcome__eyebrow">{t('misc.reader_title')} / READING SPACE</p>
           <h2>{t('welcome.title')}</h2>
           <p class="welcome__subtitle">{t('welcome.subtitle')}</p>
           <div class="welcome__actions">
@@ -1228,7 +1551,7 @@
       </div>
     {:else}
       {#if folderPath}
-        <div class="reading-context"><button class="reading-context__home" onclick={openWorkspaceHome}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
+        <div class="reading-context"><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
       <div class:reading-shell--with-echo={knowledgeEchoLoading || knowledgeEchoes.length > 0} class="reading-shell">
         {#key filePath}
@@ -1240,7 +1563,7 @@
           <aside class:knowledge-echo--collapsed={!knowledgeEchoExpanded} class:knowledge-echo--compact={compactEchoMode} class="knowledge-echo" aria-label={t('echo.title')}>
             <button class="knowledge-echo__toggle" onclick={() => knowledgeEchoExpanded = !knowledgeEchoExpanded} aria-expanded={knowledgeEchoExpanded}>
               <span class="knowledge-echo__symbol">◌</span>
-              <span><small>PYRUS</small><strong>{compactEchoMode ? compactEchoLabel() : t('echo.title')}</strong></span>
+              <span><small>{t('misc.reader_title')}</small><strong>{compactEchoMode ? compactEchoLabel() : t('echo.title')}</strong></span>
               <i>{knowledgeEchoExpanded ? '−' : '+'}</i>
             </button>
             {#if knowledgeEchoExpanded}
@@ -1299,7 +1622,7 @@
   <div class="workspace-modal-overlay" onclick={() => !isCreatingWorkspace && (newWorkspaceOpen = false)}></div>
   <dialog class="workspace-modal" open aria-labelledby="workspace-modal-title">
     <div class="workspace-modal__mark">✦</div>
-    <p>PYRUS / NEW SPACE</p>
+    <p>{t('misc.reader_title')} / NEW SPACE</p>
     <h2 id="workspace-modal-title">{t('workspace.new_title')}</h2>
     <label for="workspace-name">{t('workspace.new_name')}</label>
     <input id="workspace-name" bind:value={newWorkspaceName} onkeydown={(event) => event.key === 'Enter' && createWorkspace()} placeholder={t('workspace.new_placeholder')} />
@@ -1308,26 +1631,28 @@
   </dialog>
 {/if}
 
-<button class="md-reader__btn floating-gear" onclick={() => drawerOpen = !drawerOpen} aria-label={t('settings.title')}>
+<button class="md-reader__btn floating-gear" class:floating-gear--hidden={drawerOpen} tabindex={drawerOpen ? -1 : 0} aria-hidden={drawerOpen} onclick={() => drawerOpen = !drawerOpen} aria-label={t('settings.title')}>
   <span>⚙</span>
 </button>
 
 {#if globalSearchOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="command-overlay" onclick={closeGlobalSearch}></div>
-  <dialog class="command-palette" open aria-label={t('search.title')}>
-    <div class="command-palette__input"><span>⌕</span><input bind:this={globalSearchInput} bind:value={globalSearchQuery} placeholder={t('search.hint')} /><kbd>ESC</kbd></div>
-    <div class="command-palette__results">
+  <div class="command-overlay" transition:fade={{ duration: reducedMotion ? 0 : 160 }} onclick={closeGlobalSearch}></div>
+  <dialog class="command-palette" transition:fly={{ y: -12, duration: reducedMotion ? 0 : 220, easing: cubicOut }} open aria-label={t('search.title')}>
+    <div class="command-palette__input"><span>⌕</span><input bind:this={globalSearchInput} bind:value={globalSearchQuery} onkeydown={handleSearchKeys} role="combobox" aria-label={t('search.title')} aria-autocomplete="list" aria-expanded="true" aria-controls="search-results" aria-activedescendant={!isGlobalSearching && globalSearchResults.length ? `search-result-${selectedSearchIndex}` : undefined} placeholder={t('search.hint')} /><kbd>ESC</kbd></div>
+    <div class="command-palette__results" id="search-results" role="listbox" aria-label={t('search.title')}>
       {#if globalSearchQuery.trim() === ''}
         <p class="command-palette__empty">{t('search.open_hint')}</p>
       {:else if isGlobalSearching}
-        <p class="command-palette__empty">Searching…</p>
+        <p class="command-palette__empty">{t('search.loading')}</p>
+      {:else if globalSearchError}
+        <p class="command-palette__empty" role="alert">{t('search.failed')}</p>
       {:else if globalSearchResults.length === 0}
         <p class="command-palette__empty">{t('search.empty')}</p>
       {:else}
-        {#each globalSearchResults as result}
-          <button class="command-result" onclick={() => { openSearchResult(result, globalSearchQuery); closeGlobalSearch(); }}>
+        {#each globalSearchResults as result, index}
+          <button id={`search-result-${index}`} role="option" aria-selected={index === selectedSearchIndex} tabindex="-1" class:command-result--selected={index === selectedSearchIndex} class="command-result" onclick={() => { openSearchResult(result, globalSearchQuery); closeGlobalSearch(); }}>
             <span class="command-result__icon">✦</span><span class="command-result__body"><strong>{result.file_name}</strong><small>{result.snippet}</small></span><span class="command-result__line">L{result.line_number}</span>
           </button>
         {/each}
@@ -1339,15 +1664,15 @@
 {#if drawerOpen}
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="drawer-overlay" onclick={() => drawerOpen = false}></div>
-<div class="drawer">
+<div class="drawer-overlay" transition:fade={{ duration: reducedMotion ? 0 : 180 }} onclick={() => drawerOpen = false}></div>
+<div class="drawer" transition:fly={{ x: 36, duration: reducedMotion ? 0 : 280, easing: cubicOut }}>
   <div class="drawer__top">
-    <div class="drawer__heading"><p>PYRUS / PERSONAL SPACE</p><h3>{t('settings.title')}</h3></div>
+    <div class="drawer__heading"><p>{t('misc.reader_title')} / PERSONAL SPACE</p><h3>{t('settings.title')}</h3></div>
     <button class="drawer__close" onclick={() => drawerOpen = false} aria-label={t('settings.close')}>×</button>
   </div>
   <div class="drawer__actions">
     <button onclick={showNewWorkspace} class="btn-primary">{t('workspace.new')}</button>
-    <button onclick={openFile} class="btn-primary">{t('settings.open_file')}</button>
+    <button onclick={openFile} class="btn-secondary">{t('settings.open_file')}</button>
     <button onclick={openFolder} class="btn-secondary">{t('settings.open_folder')}</button>
   </div>
 
@@ -1360,15 +1685,16 @@
          <option value="en">English</option>
        </select>
     </div>
-    <div class="setting-row">
-       <label for="settings-theme">{t('settings.appearance')}</label>
-       <select id="settings-theme" bind:value={currentTheme} onchange={syncStore}>
-         <option value="light">{t('theme.light')}</option>
-         <option value="dark">{t('theme.dark')}</option>
-         <option value="newsprint">✨ {t('theme.newsprint')}</option>
-         <option value="terminal">✨ {t('theme.terminal')}</option>
-         <option value="glass">✨ {t('theme.glass')}</option>
-       </select>
+    <div class="appearance-picker" role="group" aria-label={t('settings.appearance')}>
+      <p>{t('settings.appearance')}</p>
+      <div class="appearance-picker__options">
+        {#each appearanceThemes as theme}
+          <button class="theme-choice" class:theme-choice--selected={currentTheme === theme} aria-pressed={currentTheme === theme} onclick={() => { currentTheme = theme; syncStore(); }}>
+            <span class="theme-choice__preview" data-theme={theme} aria-hidden="true"><i></i><span><b>Aa</b><em></em><em></em></span><strong>{currentTheme === theme ? '✓' : ''}</strong></span>
+            <span>{t(`theme.${theme}`)}</span>
+          </button>
+        {/each}
+      </div>
     </div>
   </div>
 
@@ -1420,6 +1746,41 @@
 {/if}
 
 <style>
+  .reading-toolbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 8px 22px; border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); background: color-mix(in srgb, var(--color-bg) 94%, transparent); backdrop-filter: blur(16px); }
+  .reading-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; padding: 5px 8px; border: 0; border-radius: 9px; color: var(--color-text-secondary); background: transparent; font: 18px var(--font-family-body); cursor: pointer; transition: background .18s ease, color .18s ease; }
+  .reading-toolbar button:hover:not(:disabled) { background: var(--color-primary-alpha-10); color: var(--color-primary); }
+  .reading-toolbar button:disabled { opacity: .3; cursor: default; }
+  .reading-toolbar__divider { width: 1px; height: 16px; margin: 0 5px; background: var(--color-border); }
+  .reading-toolbar .reading-toolbar__return { margin-left: 8px; min-width: 0; font-size: 12px; color: var(--color-primary); }
+  .reading-toolbar .reading-toolbar__search { margin-left: auto; gap: 10px; font-size: 12px; }
+  .reading-toolbar__search kbd { color: var(--color-text-gray); font-size: 10px; }
+  .command-result--selected { background: var(--color-primary-alpha-10) !important; box-shadow: inset 2px 0 var(--color-primary); }
+  @media (max-width: 700px) { .reading-toolbar__search kbd { display: none; } .reading-toolbar { flex-wrap: wrap; } }
+  .reading-toolbar + .welcome { min-height: calc(100vh - 52px); }
+  :global(.md-reader__markdown-content :is(h1, h2, h3, h4, h5, h6)) { scroll-margin-top: 72px; }
+  /* Shared rhythm for controls, panels and feedback. */
+  :global(:root) { --motion-ease: cubic-bezier(.2, .8, .2, 1); }
+  :global(button:focus-visible), :global(summary:focus-visible), :global(select:focus-visible) { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+  :global(button) { -webkit-tap-highlight-color: transparent; }
+  .appearance-picker { padding-top: 12px; }
+  .appearance-picker > p { margin: 0 0 10px; color: var(--color-text-secondary); font-size: 12px; }
+  .appearance-picker__options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 9px; }
+  .theme-choice { display: grid; gap: 7px; padding: 0; border: 0; color: var(--color-text-gray); background: transparent; font: 11px var(--font-family-body); cursor: pointer; text-align: left; }
+  .theme-choice--selected { color: var(--color-primary); font-weight: 650; }
+  .theme-choice__preview { position: relative; display: flex; width: 100%; height: 57px; overflow: hidden; border: 1px solid #dfe3e9; border-radius: 9px; color: #445063; background: #fff; transition: box-shadow .2s var(--motion-ease), transform .2s var(--motion-ease); }
+  .theme-choice__preview > i { width: 22%; flex: none; border-right: 1px solid currentColor; opacity: .18; background: currentColor; }
+  .theme-choice__preview > span { display: grid; align-content: center; gap: 4px; width: 62%; padding: 8px; }
+  .theme-choice__preview b { font: 600 16px Georgia, serif; }
+  .theme-choice__preview em { height: 2px; border-radius: 2px; background: currentColor; opacity: .3; }
+  .theme-choice__preview em:last-child { width: 65%; }
+  .theme-choice__preview strong { position: absolute; right: 5px; bottom: 4px; font-size: 11px; }
+  .theme-choice__preview[data-theme='light'] { color: #326657; border-color: #dedfd7; background: #faf9f6; }
+  .theme-choice__preview[data-theme='dark'] { color: #a3c8b5; border-color: #343d35; background: #1c231f; }
+  .theme-choice__preview[data-theme='newsprint'] { color: #776048; border-color: #d7cdbb; background: #f2eddf; }
+  .theme-choice__preview[data-theme='terminal'] { color: #88c0d0; border-color: #434c5e; background: #2e3440; }
+  .theme-choice__preview[data-theme='glass'] { color: #10b981; border-color: #374151; background: linear-gradient(135deg, #0f172a, #23342f); }
+  .theme-choice--selected .theme-choice__preview { box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-primary); }
+  .theme-choice:hover .theme-choice__preview { transform: translateY(-2px); }
   .drawer {
     position: fixed;
     top: 0;
@@ -1433,7 +1794,6 @@
     flex-direction: column;
     gap: 14px;
     overflow-y: auto;
-    animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     background: color-mix(in srgb, var(--color-side-bg) 92%, transparent);
     border-left: 1px solid var(--color-side-border);
     backdrop-filter: blur(28px) saturate(140%);
@@ -1491,7 +1851,7 @@
     font-size: 12px;
     transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
   }
-  .btn-primary { border: 1px solid var(--color-primary); background: var(--color-primary); color: var(--color-white); }
+  .btn-primary { border: 1px solid var(--color-primary); background: var(--color-primary); color: var(--color-on-primary); }
   .btn-secondary { border: 1px solid var(--color-border); background: var(--color-bg); color: var(--color-text-primary); }
   .btn-primary:hover, .btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 8px 18px color-mix(in srgb, var(--color-primary) 16%, transparent); }
   .text-button { border: 0; background: transparent; color: var(--color-primary); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
@@ -1508,10 +1868,9 @@
     transition: background 0.2s;
   }
   .sidebar-resizer:hover, .sidebar-resizer:active {
-    background: rgba(0, 122, 204, 0.3);
+    background: color-mix(in srgb, var(--color-primary) 30%, transparent);
   }
   
-  @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
   .floating-gear { position: fixed; right: 28px; bottom: 28px; z-index: 100; display: grid; place-items: center; width: 46px; height: 46px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-side-bg); color: var(--color-text-primary); box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
   .floating-gear span { font-size: 20px; transition: transform .35s ease; }
   .floating-gear:hover span { transform: rotate(55deg); }
@@ -1675,28 +2034,48 @@
   .workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(800px, 100%); gap: 14px; }
   .workspace-card { min-height: 190px; padding: 20px; border: 1px solid var(--color-border); border-radius: 16px; background: color-mix(in srgb, var(--color-bg) 82%, transparent); box-shadow: 0 16px 38px color-mix(in srgb, var(--color-text-primary) 5%, transparent); }
   .workspace-card--pinned { border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border)); }
-  .workspace-card--rediscover { grid-column: span 2; min-height: 0; padding: 23px; overflow: visible; border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border)); background: linear-gradient(145deg, color-mix(in srgb, var(--color-primary-alpha-10) 58%, var(--color-bg)), color-mix(in srgb, var(--color-bg) 92%, transparent)); }
-  .rediscovery-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .rediscovery-heading__local { padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border)); border-radius: 999px; color: var(--color-primary); background: color-mix(in srgb, var(--color-bg) 68%, transparent); font-size: 8px; font-weight: 750; letter-spacing: .1em; }
-  .rediscovery-intro { max-width: 570px; margin: 8px 0 19px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
-  .rediscovery-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-  .rediscovery-note { position: relative; min-width: 0; border: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-border)); border-radius: 13px; background: color-mix(in srgb, var(--color-bg) 88%, transparent); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
-  .rediscovery-note:hover { border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border)); box-shadow: 0 12px 24px color-mix(in srgb, var(--color-text-primary) 6%, transparent); transform: translateY(-1px); }
-  .rediscovery-note__main { position: relative; display: flex; flex-direction: column; width: 100%; min-height: 126px; padding: 15px 37px 15px 15px; overflow: hidden; border: 0; border-radius: inherit; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; }
-  .rediscovery-note__main small { margin-bottom: 10px; color: var(--color-primary); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
-  .rediscovery-note__main strong { overflow: hidden; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-  .rediscovery-note__main span { margin-top: 5px; overflow: hidden; color: var(--color-text-gray); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-  .rediscovery-note__main i { margin-top: auto; color: var(--color-primary); font-size: 15px; font-style: normal; }
-  .rediscovery-note__menu { position: absolute; top: 10px; right: 9px; z-index: 3; }
-  .rediscovery-note__menu summary { display: grid; place-items: center; width: 27px; height: 25px; border-radius: 7px; color: var(--color-text-gray); cursor: pointer; font-size: 9px; list-style: none; letter-spacing: .04em; }
-  .rediscovery-note__menu summary::-webkit-details-marker { display: none; }
-  .rediscovery-note__menu summary:hover, .rediscovery-note__menu[open] summary { color: var(--color-primary); background: var(--color-primary-alpha-10); }
-  .rediscovery-note__menu > div { position: absolute; top: 30px; right: 0; display: grid; width: 154px; padding: 5px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-side-bg); box-shadow: 0 15px 35px color-mix(in srgb, var(--color-text-primary) 16%, transparent); }
-  .rediscovery-note__menu button { padding: 8px 9px; border: 0; border-radius: 7px; color: var(--color-text-secondary); background: transparent; cursor: pointer; font: 10px var(--font-family-body); text-align: left; }
-  .rediscovery-note__menu button:hover { color: var(--color-text-primary); background: var(--color-primary-alpha-10); }
-  .rediscovery-empty { margin-top: 15px; }
   .rediscovery-reset { margin-top: 12px; padding: 0; border: 0; color: var(--color-text-gray); background: transparent; cursor: pointer; font-size: 9px; }
   .rediscovery-reset:hover { color: var(--color-primary); }
+  .workspace-card--daily-echo { position: relative; grid-column: span 2; min-height: 0; padding: clamp(24px, 4vw, 38px); overflow: hidden; border-color: color-mix(in srgb, var(--color-primary) 44%, var(--color-border)); background: linear-gradient(135deg, color-mix(in srgb, var(--color-bg) 92%, transparent), color-mix(in srgb, var(--color-primary-alpha-10) 72%, var(--color-bg))); }
+  .workspace-card--daily-echo::before { position: absolute; top: -118px; right: -70px; width: 290px; height: 290px; border: 1px solid color-mix(in srgb, var(--color-primary) 12%, transparent); border-radius: 50%; content: ''; box-shadow: 0 0 0 42px color-mix(in srgb, var(--color-primary) 3%, transparent), 0 0 0 84px color-mix(in srgb, var(--color-important) 2%, transparent); pointer-events: none; }
+  .daily-echo__heading { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .daily-echo__heading > div { display: grid; gap: 4px; }
+  .daily-echo__heading h3 { margin: 0; color: var(--color-text-primary); font-size: clamp(20px, 2.8vw, 28px); font-weight: 680; letter-spacing: -.035em; }
+  .daily-echo__date { color: var(--color-primary); font-size: 8px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+  .daily-echo__local { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--color-border)); border-radius: 999px; color: var(--color-text-gray); background: color-mix(in srgb, var(--color-bg) 64%, transparent); font-size: 8px; font-weight: 720; letter-spacing: .08em; }
+  .daily-echo__local i { color: var(--color-success); font-size: 5px; font-style: normal; box-shadow: 0 0 7px color-mix(in srgb, var(--color-success) 60%, transparent); }
+  .daily-echo { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) 164px; gap: clamp(24px, 5vw, 52px); margin-top: 26px; }
+  .daily-echo__content { min-width: 0; }
+  .daily-echo__reason { margin: 0 0 10px; color: var(--color-primary); font-size: 9px; font-weight: 760; letter-spacing: .04em; }
+  .daily-echo__document { display: grid; width: 100%; gap: 13px; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+  .daily-echo__document strong { overflow: hidden; color: var(--color-text-primary); font-size: clamp(18px, 2.3vw, 24px); font-weight: 690; letter-spacing: -.035em; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .daily-echo__document blockquote { position: relative; display: -webkit-box; max-width: 570px; margin: 0; padding-left: 18px; overflow: hidden; border: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.75; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  .daily-echo__document blockquote::before { position: absolute; top: 3px; bottom: 3px; left: 0; width: 2px; border-radius: 99px; background: linear-gradient(var(--color-primary), color-mix(in srgb, var(--color-important) 70%, var(--color-primary))); content: ''; }
+  .daily-echo__path { margin: 12px 0 0; overflow: hidden; color: var(--color-text-gray); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .daily-echo__preview { display: block; height: 56px; max-width: 570px; border-radius: 9px; }
+  .daily-echo__preview--loading { background: linear-gradient(100deg, var(--color-primary-alpha-10) 20%, color-mix(in srgb, var(--color-bg) 80%, transparent) 40%, var(--color-primary-alpha-10) 60%); background-size: 220% 100%; animation: echoShimmer 1.4s linear infinite; }
+  .daily-echo__actions { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; gap: 7px; }
+  .daily-echo__open { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--color-primary) 42%, var(--color-border)); border-radius: 10px; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 70%, var(--color-bg)); cursor: pointer; font: 700 10px var(--font-family-body); }
+  .daily-echo__open:hover { background: var(--color-primary-alpha-10); box-shadow: 0 9px 20px color-mix(in srgb, var(--color-primary) 10%, transparent); transform: translateY(-1px); }
+  .daily-echo__helpful { width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 9px var(--font-family-body); text-align: left; }
+  .daily-echo__helpful:hover, .daily-echo__helpful--saved { color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 68%, transparent); }
+  .daily-echo__add-context { padding: 2px 10px 5px; border: 0; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 8px var(--font-family-body); text-align: left; }
+  .daily-echo__add-context:hover { color: var(--color-primary); }
+  .daily-echo__menu { position: relative; }
+  .daily-echo__menu summary { width: max-content; padding: 5px 7px; border-radius: 6px; color: var(--color-text-gray); cursor: pointer; font-size: 10px; list-style: none; letter-spacing: .06em; }
+  .daily-echo__menu summary::-webkit-details-marker { display: none; }
+  .daily-echo__menu summary:hover, .daily-echo__menu[open] summary { color: var(--color-primary); background: var(--color-primary-alpha-10); }
+  .daily-echo__menu > div { position: absolute; right: 0; bottom: 28px; z-index: 4; display: grid; width: 164px; padding: 5px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-side-bg); box-shadow: 0 15px 35px color-mix(in srgb, var(--color-text-primary) 16%, transparent); }
+  .daily-echo__menu button { padding: 8px 9px; border: 0; border-radius: 7px; color: var(--color-text-secondary); background: transparent; cursor: pointer; font: 10px var(--font-family-body); text-align: left; }
+  .daily-echo__menu button:hover { color: var(--color-text-primary); background: var(--color-primary-alpha-10); }
+  .daily-echo__reflection { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 18px; border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent); }
+  .daily-echo__reflection label { color: var(--color-text-secondary); font-size: 10px; font-weight: 680; }
+  .daily-echo__reflection textarea { min-height: 72px; padding: 11px 12px; resize: vertical; border: 1px solid var(--color-border); border-radius: 10px; outline: none; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg) 80%, transparent); font: 11px/1.6 var(--font-family-body); }
+  .daily-echo__reflection textarea:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-alpha-10); }
+  .daily-echo__reflection > div { display: flex; justify-content: flex-end; gap: 7px; }
+  .daily-echo__reflection button { padding: 7px 10px; border: 0; border-radius: 7px; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 9px var(--font-family-body); }
+  .daily-echo__reflection .daily-echo__reflection-save { color: var(--color-on-primary); background: var(--color-primary); }
+  .daily-echo__empty { margin-top: 28px; }
   .workspace-card--continue { grid-column: span 2; border-color: color-mix(in srgb, var(--color-primary) 48%, var(--color-border)); background: color-mix(in srgb, var(--color-primary-alpha-10) 38%, var(--color-bg)); }
   .workspace-card--continue .workspace-card__heading h3 { font-size: 16px; }
   .workspace-card--continue .document-list button { padding: 11px 9px; }
@@ -1777,7 +2156,74 @@
   :global(mark.search-highlight) { border-radius: 3px; color: inherit; background: var(--color-mark); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mark) 55%, transparent); transition: background .7s ease, box-shadow .7s ease; }
   :global(mark.search-highlight--soft) { background: color-mix(in srgb, var(--color-mark) 28%, transparent); box-shadow: none; }
   @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px) scale(.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
-  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--rediscover { grid-column: span 1; } .rediscovery-list { grid-template-columns: 1fr; } .rediscovery-note__main { min-height: 112px; } .reading-context { padding: 0 28px; } .knowledge-echo { right: 18px; bottom: 78px; } .knowledge-echo__feedback { flex-wrap: wrap; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
+  /* Quiet surfaces, with movement concentrated on interactive elements. */
+  .drawer { top: 12px; right: 12px; bottom: 12px; width: min(390px, calc(100vw - 24px)); height: auto; border: 1px solid var(--color-border); border-radius: 24px; padding: 27px 24px 22px; gap: 20px; box-shadow: 0 24px 80px color-mix(in srgb, var(--color-text-primary) 16%, transparent); }
+  .drawer-overlay { background: color-mix(in srgb, var(--color-text-primary) 12%, transparent); backdrop-filter: blur(4px); }
+  .floating-gear--hidden { opacity: 0; pointer-events: none; }
+  .settings-section { padding: 16px; gap: 5px; border-color: color-mix(in srgb, var(--color-border) 60%, transparent); border-radius: 16px; }
+  .settings-section__title { font-size: 11px; }
+  .setting-row, .setting-switch { min-height: 42px; }
+  .setting-switch input:focus-visible + i { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+  .setting-switch i::after { transition: transform .24s var(--motion-ease); }
+  .setting-hint { font-size: 11px; }
+  .sidebar-tabs { position: relative; isolation: isolate; padding: 4px; border-color: transparent; background: color-mix(in srgb, var(--color-text-primary) 4%, transparent); }
+  .sidebar-tabs::before { position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent); border-radius: 8px; background: var(--color-bg); box-shadow: 0 2px 5px color-mix(in srgb, var(--color-text-primary) 5%, transparent); content: ''; transition: transform .26s var(--motion-ease); }
+  .sidebar-tabs--toc::before { transform: translateX(100%); }
+  .sidebar-tabs button.active, .sidebar-tabs button:hover { background: transparent; }
+  .workspace-nav__mark { width: 33px; height: 33px; border-radius: 11px; }
+  .workspace-nav strong { font-size: 13px; }
+  .workspace-nav__arrow { transition: transform .2s var(--motion-ease); }
+  .workspace-nav:hover .workspace-nav__arrow { transform: translate(2px, -2px); }
+  .pin-button:focus-visible, .file-item:focus-within .pin-button { opacity: 1; }
+  .welcome__orb { filter: blur(80px); opacity: .22; }
+  .welcome__mark { border-radius: 24px; transform: rotate(-5deg); }
+  .workspace-home { padding-top: clamp(48px, 8vh, 86px); }
+  .workspace-grid { width: min(920px, 100%); gap: 18px; }
+  .workspace-card { border-color: color-mix(in srgb, var(--color-border) 65%, transparent); box-shadow: 0 4px 18px color-mix(in srgb, var(--color-text-primary) 3%, transparent); border-radius: 20px; animation: surfaceArrive .45s var(--motion-ease) both; }
+  .workspace-card:nth-child(2) { animation-delay: 45ms; }
+  .workspace-card:nth-child(3) { animation-delay: 90ms; }
+  .workspace-card:nth-child(4) { animation-delay: 135ms; }
+  .workspace-card--daily-echo { border-color: color-mix(in srgb, var(--color-primary) 27%, var(--color-border)); background: linear-gradient(125deg, var(--color-bg), color-mix(in srgb, var(--color-primary-alpha-10) 60%, var(--color-bg))); }
+  .workspace-card--continue { border-color: color-mix(in srgb, var(--color-border) 65%, transparent); background: color-mix(in srgb, var(--color-bg) 92%, transparent); }
+  .daily-echo__date { font-size: 10px; letter-spacing: .12em; }
+  .daily-echo__reason { font-size: 11px; }
+  .daily-echo__document strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+  .daily-echo__document blockquote { font-size: 14px; }
+  .daily-echo__path { font-size: 11px; }
+  .daily-echo__open { min-height: 42px; font-size: 12px; }
+  .daily-echo__open span { transition: transform .22s var(--motion-ease); }
+  .daily-echo__open:hover span { transform: translateX(3px); }
+  .daily-echo__helpful { min-height: 36px; font-size: 11px; }
+  .daily-echo__add-context { font-size: 10px; }
+  .document-list button { padding: 10px; transition: background .18s ease, transform .2s var(--motion-ease); }
+  .document-list button:hover { transform: translateX(3px); }
+  .document-list button small { font-size: 11px; }
+  .reading-context { border-color: transparent; box-shadow: none; background: color-mix(in srgb, var(--color-side-bg) 85%, transparent); border-radius: 12px; }
+  .reading-context button { min-height: 32px; }
+  .daily-echo__open, .daily-echo__helpful, .reading-context button, .floating-gear { transition: background .2s ease, color .2s ease, box-shadow .2s ease, transform .2s var(--motion-ease); }
+  .btn-primary:active, .btn-secondary:active, .daily-echo__open:active, .floating-gear:active { transform: scale(.97); }
+  .command-palette { animation: none; border-radius: 22px; }
+  .command-palette__input { padding: 19px; }
+  .command-result { padding: 13px; }
+  .command-result__body strong { font-size: 13px; }
+  .command-result__body small { font: 12px/1.5 var(--font-family-body); }
+  @keyframes surfaceArrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @container reading-area (max-width: 620px) {
+    .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+    .workspace-card--continue, .workspace-card--daily-echo { grid-column: span 1; }
+    .daily-echo { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .daily-echo__actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+    .daily-echo__open { width: 100%; }
+    .daily-echo__helpful { width: auto; }
+    .daily-echo__menu { margin-left: auto; }
+    .workspace-home { padding: 48px 24px 80px; }
+    .onboarding__steps { grid-template-columns: 1fr; }
+    .onboarding__step + .onboarding__step { border-left: 0; border-top: 1px solid var(--color-border); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(*), :global(*::before), :global(*::after) { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  }
+  @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--daily-echo { grid-column: span 1; } .daily-echo { grid-template-columns: 1fr; gap: 20px; } .daily-echo__actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; } .daily-echo__open { grid-column: 1 / -1; } .daily-echo__helpful { text-align: left; } .daily-echo__add-context { padding: 6px; white-space: nowrap; } .daily-echo__menu > div { right: 0; bottom: auto; top: 28px; } .reading-context { padding: 0 28px; } .knowledge-echo { right: 18px; bottom: 78px; } .knowledge-echo__feedback { flex-wrap: wrap; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
   @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 60px 28px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } .knowledge-echo--compact:not(.knowledge-echo--collapsed) { right: 0; bottom: 0; z-index: 105; width: 100%; max-height: min(58vh, 520px); border-radius: 22px 22px 0 0; box-shadow: 0 -18px 55px color-mix(in srgb, var(--color-text-primary) 18%, transparent); animation: echoSheetIn .34s cubic-bezier(.16,1,.3,1); } .knowledge-echo--compact:not(.knowledge-echo--collapsed) .knowledge-echo__body { max-height: calc(min(58vh, 520px) - 58px); } .knowledge-echo--collapsed { right: 18px; bottom: 78px; } }
   @keyframes echoSheetIn { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: translateY(0); } }
 </style>

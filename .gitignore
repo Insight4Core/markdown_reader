@@ -11,3 +11,8 @@ vite.config.ts.timestamp-*
 
 # Local helper scripts
 publish.sh
+
+# Local marketing drafts and generated campaign assets
+/marketing/
+/pyrus-knowledge-echoes-article.md
+/pyrus-platform-articles.md

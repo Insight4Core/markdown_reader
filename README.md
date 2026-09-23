@@ -14,6 +14,8 @@ Pyrus is free while it grows. It is built for people who already keep notes in M
 
 Writing a note is easy. Remembering that it exists months later is harder.
 
+The knowledge home now opens with **Today's Echo**: one locally selected note, one meaningful passage, and a clear reason it returned. Read it, bring it back tomorrow, hide it, or mark it helpful with one click. Only if you want to, you can add one sentence about how it helped; that context stays on your device with the rest of your reading history.
+
 While you read, **Knowledge Echoes** quietly finds an older note connected to the page in front of you. It shows the passage that made the connection, the shared ideas, and why the note has returned—perhaps because you pinned it or have not read it for months.
 
 Open the note, move to the next echo, bring it back later, or mark it as unrelated. Pyrus remembers useful feedback and combines it with pins and reading history. The knowledge home still brings back unread and long-unvisited notes when you want a broader rediscovery moment.
@@ -32,7 +34,8 @@ Every connection is calculated entirely on your device. Pyrus does not upload or
 
 ## What makes it useful
 
-- **Rediscover forgotten notes** — Bring back unread, previously pinned, and long-unvisited notes instead of letting them disappear into a folder.
+- **Meet one note again today** — Today's Echo brings back one unread, pinned, or long-unvisited note with a meaningful passage instead of another recommendation feed.
+- **Remember why it helped** — Mark an echo as useful and optionally leave one sentence about what it helped you understand today.
 - **Meet knowledge in context** — Knowledge Echoes surfaces a related old note while you read, with a relevant excerpt and shared themes.
 - **Local knowledge spaces** — Open an existing folder or create a new knowledge base with a ready-to-read `Welcome.md`.
 - **Pick up where you stopped** — Pyrus saves your reading position for every document and surfaces it on the knowledge home.

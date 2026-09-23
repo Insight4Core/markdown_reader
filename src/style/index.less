@@ -335,8 +335,11 @@ body.md-reader {
   }
   &.side-expanded {
     .md-reader {
+      &__body {
+        padding-left: @side-width;
+      }
       &__side {
-        box-shadow: var(--color-side-shadow);
+        box-shadow: 4px 0 20px color-mix(in srgb, var(--color-text-primary) 3%, transparent);
         transform: translateX(0);
       }
       &__btn--side-expand {

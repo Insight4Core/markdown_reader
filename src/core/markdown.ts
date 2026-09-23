@@ -97,13 +97,30 @@ function initRender({ config = {}, plugins = [...MD_PLUGINS] }: MdOptions) {
     plugin && md.use(plugin[0], ...plugin.slice(1))
   })
 
+  md.core.ruler.push('source_lines', state => {
+    for (const token of state.tokens) {
+      if (token.map && token.nesting !== -1 && token.type !== 'inline') {
+        token.attrSet('data-source-start', String(token.map[0] + 1))
+        token.attrSet('data-source-end', String(token.map[1]))
+      }
+    }
+  })
+  for (const name of ['fence', 'code_block']) {
+    const render = md.renderer.rules[name]
+    if (!render) continue
+    md.renderer.rules[name] = (tokens, index, options, env, self) => {
+      const html = render(tokens, index, options, env, self)
+      const map = tokens[index].map
+      return map ? html.replace(/<pre\b/, `<pre data-source-start="${map[0] + 1}" data-source-end="${map[1]}"`) : html
+    }
+  }
   return md
 }
 
 // identify & filter frontmatter
 function removeFrontmatter(content: string): string {
   const frontmatterRegex = /^---[\s\S]+?---\n/
-  return content.replace(frontmatterRegex, '')
+  return content.replace(frontmatterRegex, match => '\n'.repeat((match.match(/\n/g) || []).length))
 }
 
 interface MdRender {
