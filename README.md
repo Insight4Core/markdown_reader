@@ -4,6 +4,7 @@
   <p><strong>A calm, local-first reading space that brings forgotten Markdown notes back to you.</strong></p>
   <p><strong>English</strong> · <a href="./README_zh-CN.md">简体中文</a></p>
   <p><a href="https://insight4core.github.io/markdown_reader/en/">Website</a> · <a href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download</a></p>
+  <p><a href="./docs/RELEASE_NOTES_v0.8.1.md">What's new in 0.8.1</a></p>
 </div>
 
 ## Early Access
@@ -39,6 +40,7 @@ Every connection is calculated entirely on your device. Pyrus does not upload or
 - **Meet knowledge in context** — Knowledge Echoes surfaces a related old note while you read, with a relevant excerpt and shared themes.
 - **Local knowledge spaces** — Open an existing folder or create a new knowledge base with a ready-to-read `Welcome.md`.
 - **Read one file, without setup** — Drop any `.md`, `.markdown`, or `.mdx` file onto Pyrus, or open it directly from the welcome screen. It opens in a focused single-note reading mode.
+- **Bring a standalone note into a knowledge base** — While reading a Markdown file from elsewhere on your drive, add it to the current knowledge base as a linked source. The original file stays where it is; Pyrus does not copy or move it.
 - **Link folders, never copy them** — Add folders from anywhere on your drive as linked sources for a knowledge base. Their original files stay put; Explorer, search, and Knowledge Echoes simply include them.
 - **Pick up where you stopped** — Pyrus saves your reading position for every document and surfaces it on the knowledge home.
 - **Pin what matters** — Keep essential notes one click away.
@@ -50,7 +52,7 @@ Every connection is calculated entirely on your device. Pyrus does not upload or
 
 1. Launch Pyrus.
 2. Select **Open Markdown file** (or drop a file onto the window) for a single note, or choose **New knowledge base** / **Open knowledge base** for a collection.
-3. From a knowledge home, choose **Add linked folder** to include Markdown living elsewhere on your drive—no file is copied or moved.
+3. While reading a standalone file, choose **Add to this knowledge base** to keep it in your collection without moving it. From a knowledge home, choose **Add linked folder** to include a whole folder from elsewhere on your drive.
 4. Return to the knowledge home to rediscover notes, use the Explorer and Outline to navigate, or press `⌘K` / `Ctrl+K` to search every linked source.
 
 ## Download

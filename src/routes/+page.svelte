@@ -1,6 +1,6 @@
 <script lang="ts">
   import { open, ask } from '@tauri-apps/plugin-dialog';
-  import { readTextFile, writeTextFile, mkdir, exists, watch, readDir } from '@tauri-apps/plugin-fs';
+  import { readFile, readTextFile, writeTextFile, mkdir, exists, watch, readDir } from '@tauri-apps/plugin-fs';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { load } from '@tauri-apps/plugin-store';
   import { resolve, dirname, join } from '@tauri-apps/api/path';
@@ -529,9 +529,10 @@
         ];
         
         markdownHtml = mdRender(content, { theme: 'light', plugins: MD_PLUGINS });
-        
+
         await tick();
         if (requestedPath !== filePath) return;
+        await loadRelativeImages(requestedPath);
         {
            const article = document.querySelector('.md-reader__markdown-content');
            if (article) {
@@ -570,6 +571,43 @@
         markdownHtml = `<div style="text-align: center; margin-top: 40vh; color: red;">读取文件失败: <br/>${e.toString()}</div>`;
         console.error("loadContent Error:", e);
       }
+  }
+
+  async function loadRelativeImages(markdownPath: string) {
+    const article = document.querySelector('.md-reader__markdown-content');
+    if (!article) return;
+    const imageRoots = [await dirname(markdownPath)];
+    if (folderPath && isWorkspaceFile(markdownPath)) imageRoots.push(...sourcePaths);
+
+    const images = Array.from(article.querySelectorAll<HTMLImageElement>('img[src]'));
+    await Promise.all(images.map(async image => {
+      const source = image.getAttribute('src')?.trim();
+      if (!source || /^(?:[a-z][a-z\d+.-]*:|\/\/|\/|#)/i.test(source)) return;
+
+      try {
+        const pathPart = decodeURIComponent(source.split(/[?#]/, 1)[0]);
+        const imagePath = await resolve(await dirname(markdownPath), pathPart);
+        if (!imageRoots.some(root => isPathInside(imagePath, root))) return;
+
+        const bytes = await readFile(imagePath);
+        const extension = imagePath.split('.').pop()?.toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          avif: 'image/avif', bmp: 'image/bmp', gif: 'image/gif', ico: 'image/x-icon',
+          jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', svg: 'image/svg+xml',
+          tif: 'image/tiff', tiff: 'image/tiff', webp: 'image/webp'
+        };
+        const mimeType = mimeTypes[extension || ''];
+        if (!mimeType) return;
+
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        }
+        image.src = `data:${mimeType};base64,${btoa(binary)}`;
+      } catch (error) {
+        console.warn('Unable to load relative Markdown image:', source, error);
+      }
+    }));
   }
 
   function normalizedPath(path: string) {
