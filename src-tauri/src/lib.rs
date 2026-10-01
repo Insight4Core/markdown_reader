@@ -208,6 +208,26 @@ fn markdown_files(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn markdown_files_for_roots(roots: &[String]) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    roots
+        .iter()
+        .map(PathBuf::from)
+        .flat_map(|root| {
+            if root.is_dir() {
+                markdown_files(&root)
+            } else if root.is_file()
+                && matches!(root.extension().and_then(|ext| ext.to_str()), Some("md" | "markdown" | "mdx"))
+            {
+                vec![root]
+            } else {
+                Vec::new()
+            }
+        })
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
+}
+
 fn analyse_markdown_file(path: &Path) -> Option<AnalysedDocument> {
     let metadata = fs::metadata(path).ok()?;
     let modified = metadata.modified().ok();
@@ -373,17 +393,16 @@ fn rank_knowledge_echoes(
 
 #[tauri::command]
 async fn find_knowledge_echoes(
-    root_path: String,
+    root_paths: Vec<String>,
     current_file: String,
     limit: usize,
 ) -> Result<Vec<KnowledgeEcho>, String> {
-    let root = PathBuf::from(&root_path);
     let current = PathBuf::from(&current_file);
-    if !root.is_dir() || !current.is_file() {
+    if root_paths.is_empty() || !current.is_file() {
         return Ok(Vec::new());
     }
 
-    let files = markdown_files(&root);
+    let files = markdown_files_for_roots(&root_paths);
     if files.len() < 2 {
         return Ok(Vec::new());
     }
@@ -397,27 +416,15 @@ async fn find_knowledge_echoes(
 }
 
 #[tauri::command]
-async fn search_content(path: String, query: String) -> Result<Vec<SearchResult>, String> {
+async fn search_content(root_paths: Vec<String>, query: String) -> Result<Vec<SearchResult>, String> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
 
     let query_lower = query.to_lowercase();
 
-    // 1. Collect all Markdown files quickly using `ignore`
-    let walker = WalkBuilder::new(path).hidden(true).git_ignore(true).build();
-
-    let mut md_files = Vec::new();
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "md" || ext == "markdown" || ext == "mdx" {
-                    md_files.push(path.to_path_buf());
-                }
-            }
-        }
-    }
+    // 1. Collect files from every linked knowledge source, without copying them.
+    let md_files = markdown_files_for_roots(&root_paths);
 
     // 2. Process files in parallel with rayon
     let mut results: Vec<SearchResult> = md_files

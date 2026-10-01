@@ -22,6 +22,7 @@
     updateMotionPreference();
     motionPreference.addEventListener('change', updateMotionPreference);
     let unlistenPromise: ReturnType<typeof listen> | null = null;
+    let unlistenDrop: (() => void) | null = null;
     let echoResizeObserver: ResizeObserver | null = null;
     const dayRefreshTimer = window.setInterval(() => currentDayKey = localDayKey(), 60000);
     if ('__TAURI_INTERNALS__' in window) {
@@ -34,9 +35,19 @@
             cleanPath = decodeURIComponent(cleanPath.slice(7));
           }
           console.log("Received file from OS:", cleanPath);
-          openSpecificFile(cleanPath);
+          openSpecificFile(cleanPath, { standalone: !isWorkspaceFile(cleanPath) });
         }
       });
+      getCurrentWindow().onDragDropEvent((event) => {
+        if (event.payload.type === 'over') {
+          isFileDragOver = true;
+        } else if (event.payload.type === 'drop') {
+          isFileDragOver = false;
+          void handleDroppedPaths(event.payload.paths);
+        } else {
+          isFileDragOver = false;
+        }
+      }).then(unlisten => { unlistenDrop = unlisten; });
     }
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
     document.addEventListener('click', handleMarkdownClick);
@@ -88,6 +99,7 @@
       window.clearInterval(dayRefreshTimer);
       echoResizeObserver?.disconnect();
       unlistenPromise?.then(unlisten => unlisten());
+      unlistenDrop?.();
     };
   });
 
@@ -109,7 +121,14 @@
   
   let sidebarTab = $state<'files' | 'toc'>('toc');
   let folderPath = $state('');
-  let folderFiles = $state<{name: string, path: string, depth: number, isDir?: boolean}[]>([]);
+  type FolderEntry = {name: string, path: string, depth: number, isDir?: boolean, isSource?: boolean};
+  let folderFiles = $state<FolderEntry[]>([]);
+  let linkedSourcesByWorkspace = $state<Record<string, string[]>>({});
+  let linkedFilesByWorkspace = $state<Record<string, string[]>>({});
+  let standaloneFilePath = $state('');
+  let singleReadingGuideDismissed = $state(false);
+  let feedbackNudgeDismissed = $state(false);
+  let isFileDragOver = $state(false);
   let collapsedFolders = $state(new Set<string>());
   let recentFiles = $state<string[]>([]);
   let pinnedFiles = $state<string[]>([]);
@@ -196,9 +215,9 @@
 
   $effect(() => {
     const query = searchQuery.trim();
-    const workspace = folderPath;
+    const workspace = sourcePaths;
     let cancelled = false;
-    if (query === '' || !workspace) {
+    if (query === '' || workspace.length === 0 || isStandaloneFile) {
        searchResults = [];
        isSearching = false;
        return;
@@ -209,7 +228,7 @@
     
     searchTimer = setTimeout(async () => {
        try {
-         const res = await invoke('search_content', { path: workspace, query });
+         const res = await invoke('search_content', { rootPaths: workspace, query });
          if (!cancelled) searchResults = res as SearchResult[];
        } catch(e) {
          console.error("Search failed:", e);
@@ -223,11 +242,11 @@
 
   $effect(() => {
     const query = globalSearchQuery.trim();
-    const workspace = folderPath;
+    const workspace = sourcePaths;
     let cancelled = false;
     selectedSearchIndex = 0;
     globalSearchError = false;
-    if (!globalSearchOpen || query === '' || !workspace) {
+    if (!globalSearchOpen || query === '' || workspace.length === 0 || isStandaloneFile) {
       globalSearchResults = [];
       isGlobalSearching = false;
       return;
@@ -236,7 +255,7 @@
     isGlobalSearching = true;
     globalSearchTimer = setTimeout(async () => {
       try {
-        const results = await invoke('search_content', { path: workspace, query }) as SearchResult[];
+        const results = await invoke('search_content', { rootPaths: workspace, query }) as SearchResult[];
         if (!cancelled) globalSearchResults = results;
       } catch (error) {
         console.error('Global search failed:', error);
@@ -251,7 +270,7 @@
   let visibleTreeFiles = $derived(filteredFiles.filter(item => {
     // Check if item should be hidden due to a collapsed parent
     for (const collapsedPath of collapsedFolders) {
-      if (item.path !== collapsedPath && item.path.startsWith(collapsedPath)) {
+      if (item.path !== collapsedPath && isPathInside(item.path, collapsedPath)) {
          return false;
       }
     }
@@ -261,6 +280,12 @@
   let sidebarWidth = $state(260);
   let markdownFiles = $derived(folderFiles.filter(file => !file.isDir));
   let workspaceName = $derived(folderPath.split(/[/\\]/).filter(Boolean).pop() || t('misc.reader_title'));
+  let linkedSourcePaths = $derived(folderPath ? (linkedSourcesByWorkspace[folderPath] || []) : []);
+  let linkedFilePaths = $derived(folderPath ? (linkedFilesByWorkspace[folderPath] || []) : []);
+  let sourcePaths = $derived(folderPath ? [folderPath, ...linkedSourcePaths, ...linkedFilePaths] : []);
+  let isStandaloneFile = $derived(Boolean(standaloneFilePath && filePath === standaloneFilePath));
+  let showSingleReadingGuide = $derived(isStandaloneFile && !singleReadingGuideDismissed);
+  let showFeedbackNudge = $derived(Boolean(folderPath && markdownFiles.length >= 3 && recentFiles.length >= 3 && !feedbackNudgeDismissed));
 
   $effect(() => {
     const appTitle = t('misc.reader_title');
@@ -282,10 +307,8 @@
   let dailyEcho = $derived(buildDailyEcho());
   $effect(() => {
     if (!dailyEchoReady || !folderPath || markdownFiles.length === 0) return;
-    const prefix = folderPath.replace(/[\\/]+$/, '') + '/';
-    if (markdownFiles.some(file => !file.path.replace(/\\/g, '/').startsWith(prefix.replace(/\\/g, '/')))) return;
     const saved = dailyEchoSelections[folderPath];
-    if (saved?.day === currentDayKey && (!saved.document || saved.document.path.replace(/\\/g, '/').startsWith(prefix.replace(/\\/g, '/')))) return;
+    if (saved?.day === currentDayKey && (!saved.document || isWorkspaceFile(saved.document.path))) return;
     dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { day: currentDayKey, document: selectDailyEcho(), read: false } };
     void syncStore();
   });
@@ -311,6 +334,11 @@
     if (!isStoreReady || !store) return;
     await store.set('folderPath', folderPath);
     await store.set('filePath', filePath);
+    await store.set('standaloneFilePath', standaloneFilePath);
+    await store.set('singleReadingGuideDismissed', singleReadingGuideDismissed);
+    await store.set('feedbackNudgeDismissed', feedbackNudgeDismissed);
+    await store.set('linkedSourcesByWorkspace', linkedSourcesByWorkspace);
+    await store.set('linkedFilesByWorkspace', linkedFilesByWorkspace);
     await store.set('maxDepth', maxDepth);
     await store.set('sidebarWidth', sidebarWidth);
     await store.set('showSidebar', showSidebar);
@@ -393,7 +421,6 @@
           let fp = typeof savedFolderPath === 'string' ? savedFolderPath : savedFolderPath.value;
           if (fp) {
              folderPath = fp;
-             scanFolder(folderPath, 1).then(files => { folderFiles = files; });
           }
         }
 
@@ -413,12 +440,23 @@
         if (savedEchoPreferences && typeof savedEchoPreferences === 'object') echoPreferences = savedEchoPreferences;
         const savedKnowledgeEchoEnabled = await store.get('knowledgeEchoEnabled') as boolean | null;
         if (typeof savedKnowledgeEchoEnabled === 'boolean') knowledgeEchoEnabled = savedKnowledgeEchoEnabled;
+        const savedLinkedSources = await store.get<Record<string, string[]>>('linkedSourcesByWorkspace');
+        if (savedLinkedSources && typeof savedLinkedSources === 'object') linkedSourcesByWorkspace = savedLinkedSources;
+        const savedLinkedFiles = await store.get<Record<string, string[]>>('linkedFilesByWorkspace');
+        if (savedLinkedFiles && typeof savedLinkedFiles === 'object') linkedFilesByWorkspace = savedLinkedFiles;
+        if (folderPath) void refreshFolder();
+        const savedStandaloneFilePath = await store.get<string>('standaloneFilePath');
+        if (typeof savedStandaloneFilePath === 'string') standaloneFilePath = savedStandaloneFilePath;
+        const savedSingleReadingGuideDismissed = await store.get('singleReadingGuideDismissed');
+        if (typeof savedSingleReadingGuideDismissed === 'boolean') singleReadingGuideDismissed = savedSingleReadingGuideDismissed;
+        const savedFeedbackNudgeDismissed = await store.get('feedbackNudgeDismissed');
+        if (typeof savedFeedbackNudgeDismissed === 'boolean') feedbackNudgeDismissed = savedFeedbackNudgeDismissed;
 
         const savedFilePath = await store.get<{value?: string} | string>('filePath');
         if (savedFilePath) {
           let fp = typeof savedFilePath === 'string' ? savedFilePath : savedFilePath.value;
           if (fp) {
-             await openSpecificFile(fp);
+             await openSpecificFile(fp, { standalone: fp === standaloneFilePath || !isWorkspaceFile(fp) });
           }
         }
         console.log("[Store] Loaded data:", await store.entries());
@@ -534,10 +572,32 @@
       }
   }
 
-  async function scanFolder(currentPath: string, currentDepth: number): Promise<{name: string, path: string, depth: number, isDir?: boolean}[]> {
+  function normalizedPath(path: string) {
+    return path.replace(/\\/g, '/').replace(/\/+$/, '');
+  }
+
+  function isMarkdownPath(path: string) {
+    return /\.(md|markdown|mdx)$/i.test(path);
+  }
+
+  function isPathInside(path: string, root: string) {
+    const normalizedRoot = normalizedPath(root);
+    const normalizedTarget = normalizedPath(path);
+    return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
+  }
+
+  function isWorkspaceFile(path: string) {
+    return sourcePaths.some(root => isPathInside(path, root));
+  }
+
+  function sourceName(path: string) {
+    return path.split(/[/\\]/).filter(Boolean).pop() || path;
+  }
+
+  async function scanFolder(currentPath: string, currentDepth: number): Promise<FolderEntry[]> {
     if (currentDepth > maxDepth) return [];
     
-    let results: {name: string, path: string, depth: number, isDir?: boolean}[] = [];
+    let results: FolderEntry[] = [];
     try {
       const entries = await readDir(currentPath);
       for (const entry of entries) {
@@ -560,6 +620,39 @@
     return results;
   }
 
+  async function scanWorkspaceSources() {
+    if (!folderPath) return [];
+    let results = await scanFolder(folderPath, 1);
+    for (const linkedPath of linkedSourcePaths) {
+      if (normalizedPath(linkedPath) === normalizedPath(folderPath)) continue;
+      const children = (await scanFolder(linkedPath, 1)).map(entry => ({ ...entry, depth: entry.depth + 1 }));
+      results.push({ name: sourceName(linkedPath), path: linkedPath, depth: 1, isDir: true, isSource: true });
+      results = [...results, ...children];
+    }
+    for (const linkedFile of linkedFilePaths) {
+      results.push({ name: sourceName(linkedFile), path: linkedFile, depth: 1, isSource: true });
+    }
+    return results;
+  }
+
+  function resetWorkspaceReadingState() {
+    saveReadingProgress();
+    resetReadingHistory();
+    standaloneFilePath = '';
+    folderFiles = [];
+    filePath = '';
+    markdownHtml = '';
+    activeHeaderId = '';
+  }
+
+  async function activateWorkspaceFolder(path: string) {
+    resetWorkspaceReadingState();
+    folderPath = path;
+    folderFiles = await scanWorkspaceSources();
+    sidebarTab = 'files';
+    void syncStore();
+  }
+
   async function openFolder() {
     drawerOpen = false;
     const selected = await open({
@@ -568,16 +661,7 @@
     });
     
     if (selected) {
-      saveReadingProgress();
-      resetReadingHistory();
-      folderFiles = [];
-      folderPath = selected as string;
-      filePath = '';
-      markdownHtml = '';
-      activeHeaderId = '';
-      folderFiles = await scanFolder(folderPath, 1);
-      sidebarTab = 'files';
-      syncStore();
+      await activateWorkspaceFolder(selected as string);
     }
   }
 
@@ -610,10 +694,7 @@
       await writeTextFile(welcomePath, createWelcomeNote(name));
       saveReadingProgress();
       resetReadingHistory();
-      folderPath = workspacePath;
-      folderFiles = await scanFolder(folderPath, 1);
-      filePath = '';
-      sidebarTab = 'files';
+      await activateWorkspaceFolder(workspacePath);
       newWorkspaceOpen = false;
       await openSpecificFile(welcomePath);
       toastMessage = `Welcome to ${name}`;
@@ -636,7 +717,7 @@
 
   async function refreshFolder() {
     if (folderPath) {
-       folderFiles = await scanFolder(folderPath, 1);
+       folderFiles = await scanWorkspaceSources();
     }
   }
 
@@ -648,8 +729,96 @@
     });
     
     if (selected) {
-      openSpecificFile(selected as string);
+      openSpecificFile(selected as string, { standalone: !isWorkspaceFile(selected as string) });
     }
+  }
+
+  async function addLinkedFolder() {
+    if (!folderPath) return;
+    drawerOpen = false;
+    const selected = await open({ directory: true, multiple: false, title: t('workspace.add_source') });
+    if (!selected) return;
+    await linkFolder(selected as string);
+  }
+
+  async function linkFolder(path: string) {
+    if (!folderPath || normalizedPath(path) === normalizedPath(folderPath)) return;
+    const current = linkedSourcesByWorkspace[folderPath] || [];
+    if (sourcePaths.some(root => isPathInside(path, root) || isPathInside(root, path))) {
+      showToast(t('workspace.source_exists'));
+      return;
+    }
+    linkedSourcesByWorkspace = { ...linkedSourcesByWorkspace, [folderPath]: [...current, path] };
+    await refreshFolder();
+    await syncStore();
+    showToast(t('workspace.source_added'));
+  }
+
+  async function removeLinkedFolder(path: string) {
+    if (!folderPath) return;
+    linkedSourcesByWorkspace = {
+      ...linkedSourcesByWorkspace,
+      [folderPath]: (linkedSourcesByWorkspace[folderPath] || []).filter(item => normalizedPath(item) !== normalizedPath(path))
+    };
+    await refreshFolder();
+    await syncStore();
+    showToast(t('workspace.source_removed'));
+  }
+
+  async function linkFile(path: string) {
+    if (!folderPath || !isMarkdownPath(path)) return;
+    if (isWorkspaceFile(path)) {
+      standaloneFilePath = '';
+      return;
+    }
+    const current = linkedFilesByWorkspace[folderPath] || [];
+    if (current.some(item => normalizedPath(item) === normalizedPath(path))) return;
+    linkedFilesByWorkspace = { ...linkedFilesByWorkspace, [folderPath]: [...current, path] };
+    standaloneFilePath = '';
+    await refreshFolder();
+    await syncStore();
+    showToast(t('workspace.file_added'));
+  }
+
+  async function addCurrentFileToWorkspace() {
+    if (!folderPath || !filePath) return;
+    await linkFile(filePath);
+    void loadKnowledgeEchoes(filePath);
+  }
+
+  async function removeLinkedFile(path: string) {
+    if (!folderPath) return;
+    linkedFilesByWorkspace = {
+      ...linkedFilesByWorkspace,
+      [folderPath]: (linkedFilesByWorkspace[folderPath] || []).filter(item => normalizedPath(item) !== normalizedPath(path))
+    };
+    if (filePath === path) standaloneFilePath = path;
+    await refreshFolder();
+    await syncStore();
+    showToast(t('workspace.file_removed'));
+  }
+
+  async function handleDroppedPaths(paths: string[]) {
+    const markdownPath = paths.find(isMarkdownPath);
+    if (markdownPath) {
+      await openSpecificFile(markdownPath, { standalone: !isWorkspaceFile(markdownPath) });
+      return;
+    }
+    const folder = paths[0];
+    if (!folder) return;
+    try {
+      await readDir(folder);
+      if (folderPath) await linkFolder(folder);
+      else await activateWorkspaceFolder(folder);
+    } catch {
+      showToast(t('workspace.drop_unsupported'));
+    }
+  }
+
+  function showToast(message: string) {
+    toastMessage = message;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastMessage = '', 2300);
   }
 
   function rememberCurrentVisit() {
@@ -697,8 +866,9 @@
     void syncStore();
   }
 
-  async function openSpecificFile(path: string, options: { history?: boolean; position?: number; fromEcho?: boolean } = {}) {
+  async function openSpecificFile(path: string, options: { history?: boolean; position?: number; fromEcho?: boolean; standalone?: boolean } = {}) {
     if (!path) return;
+    const standalone = options.standalone ?? !isWorkspaceFile(path);
     if (!options.history) {
       rememberCurrentVisit();
       if (path !== filePath) addReadingVisit(path, options.fromEcho);
@@ -706,6 +876,7 @@
     const request = ++navigationRequest;
     navigating = true;
     if (compactEchoMode) knowledgeEchoExpanded = false;
+    standaloneFilePath = standalone ? path : '';
     filePath = path;
     getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || t('misc.reader_title'));
     recentFiles = [path, ...recentFiles.filter(item => item !== path)].slice(0, 8);
@@ -715,7 +886,7 @@
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     if (request !== navigationRequest) return;
     navigating = false;
-    const todaySelection = dailyEchoSelections[folderPath];
+    const todaySelection = standalone ? undefined : dailyEchoSelections[folderPath];
     if (todaySelection?.day === currentDayKey && todaySelection.document?.path === path) {
       dailyEchoSelections = { ...dailyEchoSelections, [folderPath]: { ...todaySelection, read: true } };
     }
@@ -743,14 +914,14 @@
     const requestId = ++echoRequestId;
     knowledgeEchoes = [];
     knowledgeEchoIndex = 0;
-    if (!knowledgeEchoEnabled || !folderPath || !sourcePath.startsWith(folderPath)) {
+    if (!knowledgeEchoEnabled || isStandaloneFile || sourcePaths.length === 0 || !isWorkspaceFile(sourcePath)) {
       knowledgeEchoLoading = false;
       return;
     }
     knowledgeEchoLoading = true;
     try {
       const results = await invoke('find_knowledge_echoes', {
-        rootPath: folderPath,
+        rootPaths: sourcePaths,
         currentFile: sourcePath,
         limit: 8
       }) as KnowledgeEcho[];
@@ -897,7 +1068,7 @@
   }
 
   function openGlobalSearch() {
-    if (!folderPath) {
+    if (!folderPath || isStandaloneFile) {
       drawerOpen = true;
       return;
     }
@@ -1183,7 +1354,7 @@
   }
 
   function openWorkspaceHome(fromHistory = false) {
-    if (!folderPath && !fromHistory) return;
+    if (!folderPath && !standaloneFilePath && !fromHistory) return;
     if (!fromHistory) {
       rememberCurrentVisit();
       if (filePath) addReadingVisit('');
@@ -1194,6 +1365,7 @@
     echoRequestId += 1;
     knowledgeEchoes = [];
     knowledgeEchoLoading = false;
+    standaloneFilePath = '';
     filePath = '';
     markdownHtml = '';
     headers = [];
@@ -1211,6 +1383,7 @@
       unwatch = null;
     }
     folderPath = '';
+    standaloneFilePath = '';
     echoRequestId += 1;
     knowledgeEchoes = [];
     knowledgeEchoLoading = false;
@@ -1225,11 +1398,25 @@
     syncStore();
   }
 
-  async function sendFeedback() {
-    const title = encodeURIComponent('[Feedback] ');
+  function dismissSingleReadingGuide() {
+    singleReadingGuideDismissed = true;
+    void syncStore();
+  }
+
+  function dismissFeedbackNudge() {
+    feedbackNudgeDismissed = true;
+    void syncStore();
+  }
+
+  async function sendFeedback(context = '') {
+    const title = encodeURIComponent(context ? `[Feedback] ${context}` : '[Feedback] ');
     const productName = t('misc.reader_title');
-    const body = encodeURIComponent(`## What would make ${productName} better?\n\n\n## Context (optional)\n- OS:\n- ${productName} version:`);
+    const intro = i18nState.locale === 'zh'
+      ? `我已经读过几篇内容，想分享一个真实使用场景。\n\n`
+      : `I've spent some time reading with ${productName} and want to share one real moment.\n\n`;
+    const body = encodeURIComponent(`${intro}## ${i18nState.locale === 'zh' ? '它在哪个场景帮到了我？' : 'Where did it help?'}\n\n\n## ${i18nState.locale === 'zh' ? '还缺少什么？' : 'What is still missing?'}\n\n\n## Context (optional)\n- OS:\n- ${productName} version:`);
     try {
+      if (context === 'after-reading') dismissFeedbackNudge();
       await openUrl(`https://github.com/Insight4Core/markdown_reader/issues/new?title=${title}&body=${body}`);
     } catch (error) {
       console.error('Failed to open feedback page:', error);
@@ -1377,17 +1564,17 @@
                   {#if f.isDir}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <li class="folder-item" style="padding-left: {16 + (f.depth - 1) * 12}px" onclick={() => toggleFolder(f.path)}>
+                    <li class:folder-item--source={f.isSource} class="folder-item" style="padding-left: {16 + (f.depth - 1) * 12}px" onclick={() => toggleFolder(f.path)}>
                       <span class="folder-arrow">{collapsedFolders.has(f.path) ? '›' : '⌄'}</span>
-                      <span class="file-icon file-icon--folder"></span>
-                      <span class="file-name" title={f.name}>{f.name}</span>
+                      <span class="file-icon file-icon--folder">{f.isSource ? '↗' : ''}</span>
+                      <span class="file-name" title={f.name}>{f.isSource ? t('workspace.linked_source') + ' · ' : ''}{f.name}</span>
                     </li>
                   {:else}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <li class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
+                    <li class:file-item--source={f.isSource} class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
                       <span class="file-icon file-icon--document"></span>
-                      <span class="file-name" title={f.name}>{f.name}</span>
+                      <span class="file-name" title={f.name}>{f.isSource ? '↗ ' + t('workspace.linked_note') + ' · ' : ''}{f.name}</span>
                       <button class:visible={pinnedFiles.includes(f.path)} class="pin-button" aria-label={pinnedFiles.includes(f.path) ? t('workspace.unpin') : t('workspace.pin')} onclick={(e) => { e.stopPropagation(); togglePin(f.path); }}>✦</button>
                     </li>
                   {/if}
@@ -1425,7 +1612,7 @@
       <span class="reading-toolbar__divider" aria-hidden="true"></span>
       <button disabled={navigating || readingHistoryIndex === 0} aria-label={t('navigation.back')} title={t('navigation.back') + ' · Alt + ←'} onclick={() => navigateReadingHistory(-1)}>←</button>
       <button disabled={navigating || readingHistoryIndex >= readingHistory.length - 1} aria-label={t('navigation.forward')} title={t('navigation.forward') + ' · Alt + →'} onclick={() => navigateReadingHistory(1)}>→</button>
-      <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
+      <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath || isStandaloneFile} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
       {#if readingHistory[readingHistoryIndex]?.fromEcho && readingHistoryIndex > 0}
         <button class="reading-toolbar__return" disabled={navigating} onclick={() => navigateReadingHistory(-1)}>{t('navigation.return_reading')}</button>
       {/if}
@@ -1439,6 +1626,23 @@
           <p class="welcome__eyebrow">{t('workspace.eyebrow')}</p>
           <h2>{workspaceName}</h2>
           <p class="welcome__subtitle">{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
+          <div class="workspace-sources" aria-label={t('workspace.sources')}>
+            <span>{t('workspace.primary_source')}: {sourceName(folderPath)}</span>
+            {#each linkedSourcePaths as source}
+              <span class="workspace-source-chip" title={source}>↗ {sourceName(source)}<button aria-label={t('workspace.remove_source')} onclick={() => removeLinkedFolder(source)}>×</button></span>
+            {/each}
+            {#each linkedFilePaths as source}
+              <span class="workspace-source-chip" title={source}>↗ {sourceName(source)}<button aria-label={t('workspace.remove_file')} onclick={() => removeLinkedFile(source)}>×</button></span>
+            {/each}
+            <button class="workspace-sources__add" onclick={addLinkedFolder}>＋ {t('workspace.add_source')}</button>
+          </div>
+          {#if showFeedbackNudge}
+            <aside class="feedback-nudge" aria-label={t('feedback.nudge_title')}>
+              <span class="feedback-nudge__mark">◌</span>
+              <div><small>{t('feedback.nudge_eyebrow')}</small><strong>{t('feedback.nudge_title')}</strong><p>{t('feedback.nudge_text')}</p></div>
+              <div class="feedback-nudge__actions"><button onclick={() => sendFeedback('after-reading')}>{t('feedback.nudge_share')}</button><button onclick={dismissFeedbackNudge}>{t('feedback.nudge_later')}</button></div>
+            </aside>
+          {/if}
           <div class="workspace-grid">
             <section class="workspace-card workspace-card--daily-echo">
               <div class="daily-echo__heading">
@@ -1538,6 +1742,7 @@
           <div class="welcome__actions">
             <button class="welcome__primary" onclick={showNewWorkspace}>{t('workspace.new')}</button>
             <button class="welcome__secondary" onclick={openFolder}>{t('workspace.open_folder')}</button>
+            <button class="welcome__secondary" onclick={openFile}>{t('workspace.open_file')}</button>
           </div>
           <section class="onboarding" aria-label={t('onboarding.label')}>
             <p class="onboarding__label">{t('onboarding.label')}</p>
@@ -1550,11 +1755,23 @@
         {/if}
       </div>
     {:else}
-      {#if folderPath}
+      {#if isStandaloneFile}
+        <div class="reading-context reading-context--standalone"><span>⌁ {t('workspace.standalone')}</span><span>{sourceName(filePath)}</span>{#if folderPath}<button onclick={addCurrentFileToWorkspace}>＋ {t('workspace.add_current_file')}</button>{/if}</div>
+      {:else if folderPath}
         <div class="reading-context"><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
       <div class:reading-shell--with-echo={knowledgeEchoLoading || knowledgeEchoes.length > 0} class="reading-shell">
         {#key filePath}
+          {#if showSingleReadingGuide}
+            <aside class="single-reading-guide" aria-label={t('first_reading.title')}>
+              <span class="single-reading-guide__mark">✓</span>
+              <div><small>{t('first_reading.eyebrow')}</small><strong>{t('first_reading.title')}</strong><p>{t('first_reading.text')}</p></div>
+              <div class="single-reading-guide__actions">
+                {#if folderPath}<button onclick={addCurrentFileToWorkspace}>{t('first_reading.add')}</button>{/if}
+                <button onclick={dismissSingleReadingGuide}>{t('first_reading.continue')}</button>
+              </div>
+            </aside>
+          {/if}
           <div class="md-reader__markdown-content centered">
             {@html markdownHtml}
           </div>
@@ -1607,6 +1824,12 @@
     {/if}
   </div>
 </div>
+
+{#if isFileDragOver}
+  <div class="file-drop-overlay" aria-live="polite">
+    <div><span>↓</span><strong>{t('workspace.drop_title')}</strong><p>{folderPath ? t('workspace.drop_in_workspace') : t('workspace.drop_subtitle')}</p></div>
+  </div>
+{/if}
 
 {#if filePath}
   <div class="reading-progress" style="--progress: {progressPercent(filePath)}%" aria-hidden="true"></div>
