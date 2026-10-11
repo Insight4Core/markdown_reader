@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Learn how to open and read .md files on a Mac using TextEdit, VS Code, Quick Look, or a local Markdown reader—and choose the right default app." />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Pyrus" />
+    <meta property="og:title" content="How to open a .md file on Mac without reading raw Markdown" />
+    <meta property="og:description" content="Four practical ways to open Markdown on macOS, from a quick text check to a clean, fully rendered reading view." />
+    <meta property="og:url" content="https://insight4core.github.io/markdown_reader/en/open-md-file-mac/" />
+    <meta property="og:image" content="https://insight4core.github.io/markdown_reader/screenshots/welcome-current-en.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://insight4core.github.io/markdown_reader/en/open-md-file-mac/" />
+    <link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/open-md-file-mac/" />
+    <link rel="stylesheet" href="../../assets/site.css" />
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
+    <title>How to Open a .md File on Mac Without Raw Markdown — Pyrus</title>
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to open a .md file on Mac without reading raw Markdown","description":"Practical ways to open and read Markdown files on macOS with TextEdit, VS Code, Quick Look, or a dedicated local reader.","datePublished":"2026-10-11","dateModified":"2026-10-11","author":{"@type":"Organization","name":"Insight4Core"},"publisher":{"@type":"Organization","name":"Pyrus"},"mainEntityOfPage":"https://insight4core.github.io/markdown_reader/en/open-md-file-mac/","inLanguage":"en"},{"@type":"HowTo","name":"How to open a .md file on Mac in a rendered reading view","step":[{"@type":"HowToStep","name":"Install a Markdown reader","text":"Download and install a local Markdown reader such as Pyrus."},{"@type":"HowToStep","name":"Open the file","text":"Open Pyrus and choose Open Markdown file, or drag the .md file onto the app window."},{"@type":"HowToStep","name":"Make it the default if desired","text":"Select a .md file in Finder, open Get Info, choose the reader under Open with, and select Change All."}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What app opens .md files on a Mac?","acceptedAnswer":{"@type":"Answer","text":"TextEdit and code editors can open the plain text. A Markdown-capable editor or reader is needed to display headings, links, tables, code blocks, and images as a formatted document."}},{"@type":"Question","name":"Can I preview a .md file with Quick Look?","acceptedAnswer":{"@type":"Answer","text":"Finder can preview the text, but fully rendered Markdown depends on the macOS version and installed Quick Look extensions. A dedicated reader gives a more consistent result."}},{"@type":"Question","name":"How do I make a Markdown reader the default on macOS?","acceptedAnswer":{"@type":"Answer","text":"Select a .md file in Finder, press Command-I, choose the reader under Open with, and click Change All."}}]}]}
+    </script>
+  </head>
+  <body>
+    <header class="shell nav">
+      <a class="brand" href="../" aria-label="Pyrus home"><span class="brand-mark">✦</span><span>Pyrus</span></a>
+      <nav class="nav-links" aria-label="Article navigation"><a href="#quick-answer">Quick answer</a><a href="#compare">Compare methods</a><a href="#faq">FAQ</a><a class="language-link" href="../open-md-file-windows/">Windows guide</a></nav>
+    </header>
+    <main class="shell">
+      <header class="article-hero">
+        <p class="eyebrow">MAC MARKDOWN GUIDE</p>
+        <h1>How to open a .md file on Mac without reading raw Markdown</h1>
+        <p class="lead">Double-clicking a Markdown file often gives you a wall of <code>#</code>, <code>**</code>, and backticks. The file is not broken—macOS has simply opened the source instead of a rendered reading view.</p>
+        <div class="article-meta"><span>7 minute read</span><span>·</span><time datetime="2026-10-11">Updated October 11, 2026</time></div>
+      </header>
+
+      <div class="article-layout">
+        <article class="prose">
+          <section class="quick-answer" id="quick-answer">
+            <small>THE SHORT ANSWER</small>
+            <p>To read a <code>.md</code> file as a formatted document on a Mac, open it with an app that renders Markdown. In VS Code, press <strong>Shift+Command+V</strong> for a preview. For reading without an editor, open or drop the file into a local Markdown reader such as Pyrus.</p>
+          </section>
+
+          <h2 id="what-is-md">Why does the file look like code?</h2>
+          <p>Markdown is deliberately stored as plain text. Symbols give that text structure: <code>#</code> creates headings, asterisks create emphasis, and backticks mark code. This makes the file durable and portable, but a plain-text app shows the instructions as well as the words.</p>
+          <p>A Markdown renderer interprets those symbols and presents the same file as a finished page. It does not need to convert or replace the original.</p>
+
+          <h2 id="textedit">Option 1: Use TextEdit to inspect the source</h2>
+          <ol>
+            <li>Control-click the <code>.md</code> file in Finder.</li>
+            <li>Choose <strong>Open With</strong>, then select <strong>TextEdit</strong>.</li>
+          </ol>
+          <p>TextEdit is already on every Mac and is useful for checking the words or correcting something small. It normally treats Markdown as plain text, so formatting symbols remain visible.</p>
+          <p><strong>Best for:</strong> quick inspection and simple edits. <strong>Not ideal for:</strong> reading documentation or long notes.</p>
+
+          <h2 id="quick-look">Option 2: Try Finder Quick Look</h2>
+          <ol>
+            <li>Select the file in Finder.</li>
+            <li>Press the <strong>Space bar</strong>.</li>
+          </ol>
+          <p>Quick Look is excellent for checking whether you have the right file. The result varies by macOS version and installed extensions: you may see readable text, but not every Markdown element will necessarily be rendered.</p>
+          <p>Use it when speed matters more than typography, navigation, diagrams, or image handling.</p>
+
+          <h2 id="vscode">Option 3: Use the VS Code Markdown preview</h2>
+          <ol>
+            <li>Open the file in Visual Studio Code.</li>
+            <li>Press <strong>Shift+Command+V</strong> to open the preview.</li>
+            <li>Press <strong>Command+K</strong>, then <strong>V</strong>, for a side-by-side preview.</li>
+          </ol>
+          <p>This is the best option when you are actively editing Markdown or already working in a code project. You get the source, a rendered preview, extensions, and developer tools in one place.</p>
+          <p>If reading is the only task, the surrounding editor interface can feel heavier than the document itself.</p>
+
+          <h2 id="reader">Option 4: Read it in a dedicated local app</h2>
+          <p>A dedicated reader removes the editing surface and treats Markdown like a document. This is useful for README files, technical documentation, AI-generated notes, saved articles, and any long file you expect to return to.</p>
+          <ol>
+            <li>Install <a class="inline-link" href="https://github.com/Insight4Core/markdown_reader/releases/latest">Pyrus for macOS</a>.</li>
+            <li>Choose <strong>Open Markdown file</strong>, or drag the file onto the Pyrus window.</li>
+            <li>Read it in place. Pyrus does not upload, copy, or move the original file.</li>
+          </ol>
+          <figure class="article-figure"><img src="../../screenshots/welcome-current-en.png" alt="Pyrus welcome screen offering an Open Markdown file action" loading="lazy" /><figcaption>A single note can stay a single note. Build a knowledge base only when the file becomes part of something larger.</figcaption></figure>
+          <p>For longer documents, Pyrus adds an outline and remembers where you stopped. If the note later becomes important, you can link it into an existing knowledge base while leaving the original in its folder.</p>
+
+          <h2 id="default-app">Make a Markdown reader the default on macOS</h2>
+          <ol>
+            <li>Select any <code>.md</code> file in Finder.</li>
+            <li>Press <strong>Command+I</strong>, or Control-click and choose <strong>Get Info</strong>.</li>
+            <li>Expand <strong>Open with</strong> and choose your Markdown reader.</li>
+            <li>Click <strong>Change All…</strong> and confirm.</li>
+          </ol>
+          <p>After that, double-clicking a Markdown file opens it in the reader. You can still use <strong>Open With</strong> whenever you want TextEdit, VS Code, or another editor.</p>
+
+          <h2 id="compare">Which method should you use?</h2>
+          <div class="table-scroll"><table class="comparison-table"><thead><tr><th>Method</th><th>Best for</th><th>Rendered view</th><th>Stays local</th></tr></thead><tbody><tr><td>TextEdit</td><td>Quick inspection or tiny edits</td><td>No</td><td>Yes</td></tr><tr><td>Quick Look</td><td>Identifying a file in Finder</td><td>Limited / extension-dependent</td><td>Yes</td></tr><tr><td>VS Code</td><td>Writing and side-by-side preview</td><td>Yes</td><td>Yes</td></tr><tr><td>Dedicated reader</td><td>Comfortable reading and returning later</td><td>Yes</td><td>Yes</td></tr></tbody></table></div>
+
+          <h2 id="faq">Frequently asked questions</h2>
+          <div class="faq-list">
+            <details><summary>What app opens .md files on a Mac?</summary><p>TextEdit and code editors open the plain text. To see headings, links, tables, code blocks, and images as a formatted document, use a Markdown-capable editor or dedicated reader.</p></details>
+            <details><summary>Can Safari open a local Markdown file?</summary><p>Safari can show plain text, but it does not consistently render a local Markdown document as a finished page. Browser extensions or online converters can help, but a local reader is simpler for private files.</p></details>
+            <details><summary>Can I preview Markdown with the Space bar?</summary><p>Quick Look can preview the file, but the level of Markdown rendering depends on macOS and any Quick Look extensions you have installed.</p></details>
+            <details><summary>Why do local images disappear?</summary><p>Images are often referenced using paths relative to the Markdown file. Keep the note and its image folder in their original relative positions, and choose a reader that resolves assets from the source file location.</p></details>
+            <details><summary>Will changing the default app modify my file?</summary><p>No. Changing the default app only changes which application opens the file when you double-click it. The Markdown content and location remain unchanged.</p></details>
+          </div>
+
+          <section class="article-cta">
+            <h2>Read the document. Keep the file.</h2>
+            <p>Pyrus is a free, open-source Markdown reader for macOS, Windows, and Linux. It opens one note without setup and leaves every file in the folder you chose.</p>
+            <a class="button button--primary" href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download Pyrus for macOS</a>
+          </section>
+        </article>
+        <aside class="article-aside">
+          <p>IN THIS GUIDE</p>
+          <a href="#quick-answer">The short answer</a><a href="#textedit">Use TextEdit</a><a href="#quick-look">Use Quick Look</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-windows/">Open .md on Windows →</a>
+        </aside>
+      </div>
+    </main>
+    <footer class="shell footer"><span>© <span data-year>2026</span> Insight4Core</span><span><a href="../markdown-folder-knowledge-base/">Read a Markdown folder</a> · <a href="../">Back to Pyrus</a></span></footer>
+    <script src="../../assets/site.js" defer></script>
+  </body>
+</html>

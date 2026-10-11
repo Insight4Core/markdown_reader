@@ -45,4 +45,12 @@
     <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/search-cannot-find-forgotten-notes/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://insight4core.github.io/markdown_reader/zh-cn/search-cannot-find-forgotten-notes/" />
   </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/open-md-file-windows/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/open-md-file-windows/" />
+  </url>
+  <url>
+    <loc>https://insight4core.github.io/markdown_reader/en/open-md-file-mac/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://insight4core.github.io/markdown_reader/en/open-md-file-mac/" />
+  </url>
 </urlset>
