@@ -381,7 +381,7 @@
     async function initSettings() {
       try {
         store = await load('.settings.dat', { autoSave: false });
-        
+
         const savedLocale = await store.get<{value?: string} | string>('locale');
         if (savedLocale) {
             i18nState.locale = typeof savedLocale === 'string' ? savedLocale : (savedLocale.value || 'zh');
@@ -819,9 +819,18 @@
   }
 
   async function addCurrentFileToWorkspace() {
-    if (!folderPath || !filePath) return;
-    await linkFile(filePath);
-    void loadKnowledgeEchoes(filePath);
+    if (!filePath) return;
+    const targetFile = filePath;
+    if (!folderPath) {
+      const selected = await open({ directory: true, multiple: false, title: t('first_reading.choose_title') });
+      if (!selected) return;
+      await activateWorkspaceFolder(selected as string);
+      await linkFile(targetFile);
+      await openSpecificFile(targetFile, { standalone: false });
+      return;
+    }
+    await linkFile(targetFile);
+    void loadKnowledgeEchoes(targetFile);
   }
 
   async function removeLinkedFile(path: string) {
@@ -1550,6 +1559,7 @@
 
 
 <div class="md-reader" style="--side-width: {sidebarWidth}px;">
+  {#if folderPath || filePath}
   <div class="md-reader__side">
     {#if folderPath}
       <button class="workspace-nav" onclick={() => openWorkspaceHome()} aria-label={t('workspace.home')}>
@@ -1641,8 +1651,10 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="sidebar-resizer" onmousedown={startResize}></div>
   </div>
+  {/if}
 
-  <div class="md-reader__body">
+  <div class="md-reader__body" style={!folderPath && !filePath ? 'padding-left: 0' : undefined}>
+    {#if folderPath || filePath}
     <nav class="reading-toolbar" aria-label={t('navigation.label')}>
       <button class="reading-toolbar__sidebar" aria-label={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} title={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} aria-pressed={showSidebar} onclick={toggleSidebar}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M5.5 8h1M5.5 11h1"/></svg>
@@ -1655,6 +1667,7 @@
         <button class="reading-toolbar__return" disabled={navigating} onclick={() => navigateReadingHistory(-1)}>{t('navigation.return_reading')}</button>
       {/if}
     </nav>
+    {/if}
     {#if !filePath}
       <div class:workspace-home={Boolean(folderPath)} class="welcome">
         <div class="welcome__orb welcome__orb--one"></div>
@@ -1778,10 +1791,11 @@
           <h2>{t('welcome.title')}</h2>
           <p class="welcome__subtitle">{t('welcome.subtitle')}</p>
           <div class="welcome__actions">
-            <button class="welcome__primary" onclick={showNewWorkspace}>{t('workspace.new')}</button>
+            <button class="welcome__primary" onclick={openFile}>{t('workspace.open_file')}<span>→</span></button>
             <button class="welcome__secondary" onclick={openFolder}>{t('workspace.open_folder')}</button>
-            <button class="welcome__secondary" onclick={openFile}>{t('workspace.open_file')}</button>
           </div>
+          <p class="welcome__drag-hint">{t('welcome.drag_hint')}</p>
+          <button class="welcome__new" onclick={showNewWorkspace}>{t('welcome.new_prompt')} <strong>{t('workspace.new')} →</strong></button>
           <section class="onboarding" aria-label={t('onboarding.label')}>
             <p class="onboarding__label">{t('onboarding.label')}</p>
             <div class="onboarding__steps">
@@ -1805,7 +1819,7 @@
               <span class="single-reading-guide__mark">✓</span>
               <div><small>{t('first_reading.eyebrow')}</small><strong>{t('first_reading.title')}</strong><p>{t('first_reading.text')}</p></div>
               <div class="single-reading-guide__actions">
-                {#if folderPath}<button onclick={addCurrentFileToWorkspace}>{t('first_reading.add')}</button>{/if}
+                <button onclick={addCurrentFileToWorkspace}>{folderPath ? t('first_reading.add') : t('first_reading.choose_and_add')}</button>
                 <button onclick={dismissSingleReadingGuide}>{t('first_reading.continue')}</button>
               </div>
             </aside>
@@ -2276,11 +2290,17 @@
   .welcome h2 { max-width: 680px; margin: 0; color: var(--color-text-primary); font-size: clamp(30px, 5vw, 54px); font-weight: 650; letter-spacing: -.06em; line-height: 1.06; text-wrap: balance; }
   .welcome__subtitle { max-width: 450px; margin: 16px 0 27px; color: var(--color-text-secondary); font-size: 14px; }
   .welcome__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-  .welcome__primary, .welcome__secondary { padding: 11px 16px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 600; transition: transform .18s ease, box-shadow .18s ease; }
-  .welcome__primary { border: 1px solid var(--color-primary); color: var(--color-white); background: var(--color-primary); box-shadow: 0 10px 20px color-mix(in srgb, var(--color-primary) 22%, transparent); }
+  .welcome__primary, .welcome__secondary { min-height: 43px; padding: 11px 17px; border-radius: 11px; cursor: pointer; font-size: 13px; font-weight: 650; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
+  .welcome__primary { display: flex; align-items: center; gap: 22px; border: 1px solid var(--color-primary); color: var(--color-white); background: var(--color-primary); box-shadow: 0 10px 20px color-mix(in srgb, var(--color-primary) 22%, transparent); }
+  .welcome__primary span { font-size: 16px; font-weight: 400; transition: transform .18s ease; }
+  .welcome__primary:hover span { transform: translateX(3px); }
   .welcome__secondary { border: 1px solid var(--color-border); color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg) 80%, transparent); }
   .welcome__primary:hover, .welcome__secondary:hover { transform: translateY(-2px); }
-  .onboarding { width: min(760px, 100%); margin-top: 58px; text-align: left; }
+  .welcome__drag-hint { margin: 13px 0 0; color: var(--color-text-gray); font-size: 10px; }
+  .welcome__new { margin-top: 17px; padding: 4px 7px; border: 0; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 11px var(--font-family-body); }
+  .welcome__new strong { margin-left: 3px; color: var(--color-primary); font-weight: 680; }
+  .welcome__new:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+  .onboarding { width: min(820px, 100%); margin-top: 48px; text-align: left; }
   .onboarding__label { margin: 0 0 11px; color: var(--color-text-gray); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
   .onboarding__steps { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--color-border); border-radius: 16px; background: color-mix(in srgb, var(--color-bg) 54%, transparent); box-shadow: 0 18px 45px color-mix(in srgb, var(--color-text-primary) 5%, transparent); overflow: hidden; }
   .onboarding__step { display: grid; grid-template-columns: auto 1fr; gap: 10px; min-height: 122px; padding: 18px; }
