@@ -14,6 +14,8 @@
   import { tick, onMount } from 'svelte';
   import { fade, fly, slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
+  import { parseReadingLink, fragmentCandidates } from '$lib/reading-links';
+  import { readingPercent, unfinishedDocuments, groupSearchHits, highlightParts, documentContext } from '$lib/reading-presentation';
   import '@/style/index.less';
 
   onMount(() => {
@@ -50,11 +52,12 @@
       }).then(unlisten => { unlistenDrop = unlisten; });
     }
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
-    document.addEventListener('click', handleMarkdownClick);
+    // Capture before SvelteKit's delegated router interprets note links as app routes.
+    document.addEventListener('click', handleMarkdownClick, true);
     const handleGlobalShortcut = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const editing = target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
-      if (!editing && !drawerOpen && !globalSearchOpen && !newWorkspaceOpen) {
+      if (!editing && !drawerOpen && !globalSearchOpen && !newWorkspaceOpen && !(compactEchoMode && knowledgeEchoExpanded)) {
         if (event.altKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
           event.preventDefault();
           void navigateReadingHistory(event.key === 'ArrowLeft' ? -1 : 1);
@@ -70,15 +73,9 @@
       }
       if (event.key === 'Escape' && globalSearchOpen) closeGlobalSearch();
       else if (event.key === 'Escape' && drawerOpen) drawerOpen = false;
-      else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) knowledgeEchoExpanded = false;
-    };
-    const handleOutsideEchoClick = (event: MouseEvent) => {
-      if (!compactEchoMode || !knowledgeEchoExpanded) return;
-      const target = event.target as HTMLElement;
-      if (!target.closest('.knowledge-echo')) knowledgeEchoExpanded = false;
+      else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) closeEchoPeek();
     };
     window.addEventListener('keydown', handleGlobalShortcut);
-    document.addEventListener('click', handleOutsideEchoClick);
     requestAnimationFrame(() => {
       const readingBody = document.querySelector('.md-reader__body');
       if (!readingBody || typeof ResizeObserver === 'undefined') return;
@@ -93,9 +90,8 @@
     return () => {
       motionPreference.removeEventListener('change', updateMotionPreference);
       window.removeEventListener('scroll', saveReadingProgress);
-      document.removeEventListener('click', handleMarkdownClick);
+      document.removeEventListener('click', handleMarkdownClick, true);
       window.removeEventListener('keydown', handleGlobalShortcut);
-      document.removeEventListener('click', handleOutsideEchoClick);
       window.clearInterval(dayRefreshTimer);
       echoResizeObserver?.disconnect();
       unlistenPromise?.then(unlisten => unlisten());
@@ -177,13 +173,16 @@
   let knowledgeEchoLoading = $state(false);
   let knowledgeEchoExpanded = $state(false);
   let compactEchoMode = $state(true);
+  let echoTrigger = $state<HTMLButtonElement | undefined>(undefined);
+  let echoReturnFocus: HTMLElement | null = null;
+  let echoPeekScroll = 0;
   let knowledgeEchoEnabled = $state(true);
   let echoPreferences = $state<Record<string, EchoPreference>>({});
   let echoRequestId = 0;
   let progressSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingScrollPosition: number | null = null;
-  let pendingSearchTerm = '';
-  let pendingSearchLine = 0;
+  type OpenFileOptions = { history?: boolean; position?: number; fromEcho?: boolean; standalone?: boolean; anchor?: string; search?: { term: string; line: number } };
+  let readingError = $state<{ path: string; options: OpenFileOptions } | null>(null);
+  let retryingReading = $state(false);
 
   let searchQuery = $state('');
   
@@ -195,16 +194,21 @@
   }
   
   let searchResults = $state<SearchResult[]>([]);
+  let sidebarSearchGroups = $derived(groupSearchHits(searchResults));
   let isSearching = $state(false);
+  let sidebarSearchError = $state(false);
+  let sidebarSearchRetry = $state(0);
   let searchTimer: any = null;
   let globalSearchOpen = $state(false);
   let globalSearchQuery = $state('');
   let globalSearchResults = $state<SearchResult[]>([]);
+  let globalSearchGroups = $derived(groupSearchHits(globalSearchResults));
   let isGlobalSearching = $state(false);
   let globalSearchTimer: ReturnType<typeof setTimeout> | null = null;
   let globalSearchInput = $state<HTMLInputElement | undefined>(undefined);
   let selectedSearchIndex = $state(0);
   let globalSearchError = $state(false);
+  let globalSearchRetry = $state(0);
   let searchReturnFocus: HTMLElement | null = null;
   let toastMessage = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,7 +220,9 @@
   $effect(() => {
     const query = searchQuery.trim();
     const workspace = sourcePaths;
+    void sidebarSearchRetry;
     let cancelled = false;
+    sidebarSearchError = false;
     if (query === '' || workspace.length === 0 || isStandaloneFile) {
        searchResults = [];
        isSearching = false;
@@ -232,7 +238,7 @@
          if (!cancelled) searchResults = res as SearchResult[];
        } catch(e) {
          console.error("Search failed:", e);
-         if (!cancelled) searchResults = [];
+         if (!cancelled) { searchResults = []; sidebarSearchError = true; }
        } finally {
          if (!cancelled) isSearching = false;
        }
@@ -243,6 +249,7 @@
   $effect(() => {
     const query = globalSearchQuery.trim();
     const workspace = sourcePaths;
+    void globalSearchRetry;
     let cancelled = false;
     selectedSearchIndex = 0;
     globalSearchError = false;
@@ -295,15 +302,12 @@
     }
   });
 
-  let recentDocuments = $derived(recentFiles.map(path => markdownFiles.find(file => file.path === path)).filter(Boolean));
-  let pinnedDocuments = $derived(pinnedFiles.map(path => markdownFiles.find(file => file.path === path)).filter(Boolean));
-  let continueDocuments = $derived(
-    Object.entries(readingProgress)
-      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
-      .map(([path]) => markdownFiles.find(file => file.path === path))
-      .filter(Boolean)
-      .slice(0, 5)
-  );
+  let continueDocuments = $derived(unfinishedDocuments(markdownFiles, readingProgress));
+  let resumeDocument = $derived(continueDocuments[0]);
+  let moreContinueDocuments = $derived(continueDocuments.slice(1));
+  let recentDocuments = $derived(recentFiles.map(path => markdownFiles.find(file => file.path === path))
+    .filter((file): file is FolderEntry => Boolean(file) && !continueDocuments.some(doc => doc.path === file!.path)));
+  let pinnedDocuments = $derived(pinnedFiles.map(path => markdownFiles.find(file => file.path === path)).filter((file): file is FolderEntry => Boolean(file)));
   let dailyEcho = $derived(buildDailyEcho());
   $effect(() => {
     if (!dailyEchoReady || !folderPath || markdownFiles.length === 0) return;
@@ -516,23 +520,27 @@
     }
   });
   
-  async function loadContent() {
+  function renderReadingContent(content: string) {
+    return mdRender(content, { theme: 'light', plugins: [
+      'Emoji', 'Sub', 'Sup', 'Ins', 'Abbr', 'Katex', 'Mermaid',
+      'Mark', 'Deflist', 'Footnote', 'TaskLists', 'TOC', 'Alert'
+    ] });
+  }
+
+  async function loadContent(preparedHtml?: string, options: OpenFileOptions = {}) {
       if (!filePath) return;
       const requestedPath = filePath;
       try {
-        const content = await readTextFile(requestedPath);
+        const html = preparedHtml ?? renderReadingContent(await readTextFile(requestedPath));
         if (requestedPath !== filePath) return;
-        
-        const MD_PLUGINS = [
-          'Emoji', 'Sub', 'Sup', 'Ins', 'Abbr', 'Katex', 'Mermaid',
-          'Mark', 'Deflist', 'Footnote', 'TaskLists', 'TOC', 'Alert'
-        ];
-        
-        markdownHtml = mdRender(content, { theme: 'light', plugins: MD_PLUGINS });
-
+        if (readingError?.path === requestedPath) readingError = null;
+        markdownHtml = html;
+        headers = [];
+        activeHeaderId = '';
         await tick();
         if (requestedPath !== filePath) return;
         await loadRelativeImages(requestedPath);
+        if (requestedPath !== filePath) return;
         {
            const article = document.querySelector('.md-reader__markdown-content');
            if (article) {
@@ -552,14 +560,15 @@
               activeHeaderId = headers[0]?.id || '';
               requestAnimationFrame(updateActiveHeader);
            }
-           if (pendingSearchTerm) {
-             scrollToSearchMatch(pendingSearchTerm, pendingSearchLine);
-             pendingSearchTerm = '';
-             pendingSearchLine = 0;
-             pendingScrollPosition = null;
-           } else if (pendingScrollPosition !== null) {
-             const position = pendingScrollPosition;
-             pendingScrollPosition = null;
+           if (options.anchor !== undefined) {
+             if (!scrollToFragment(options.anchor)) {
+               window.scrollTo({ top: 0, behavior: 'instant' });
+               showToast(t('reading.anchor_missing'));
+             }
+           } else if (options.search) {
+             scrollToSearchMatch(options.search.term, options.search.line);
+           } else if (options.position !== undefined) {
+             const position = options.position;
              await new Promise<void>(resolve => requestAnimationFrame(() => {
                if (requestedPath === filePath) window.scrollTo({ top: position, behavior: 'instant' });
                resolve();
@@ -568,7 +577,8 @@
         }
       } catch (e: any) {
         if (requestedPath !== filePath) return;
-        markdownHtml = `<div style="text-align: center; margin-top: 40vh; color: red;">读取文件失败: <br/>${e.toString()}</div>`;
+        // Keep the last successfully rendered article and its matching outline.
+        readingError = { path: requestedPath, options };
         console.error("loadContent Error:", e);
       }
   }
@@ -676,6 +686,7 @@
   function resetWorkspaceReadingState() {
     saveReadingProgress();
     resetReadingHistory();
+    readingError = null;
     standaloneFilePath = '';
     folderFiles = [];
     filePath = '';
@@ -893,10 +904,12 @@
     const visit = readingHistory[index];
     if (!visit) return;
     rememberCurrentVisit();
-    readingHistoryIndex = index;
-    pendingSearchTerm = '';
-    if (visit.path) await openSpecificFile(visit.path, { history: true, position: visit.position });
+    if (visit.path) {
+      const opened = await openSpecificFile(visit.path, { history: true, position: visit.position });
+      if (opened) readingHistoryIndex = index;
+    }
     else {
+      readingHistoryIndex = index;
       openWorkspaceHome(true);
       await tick();
       window.scrollTo({ top: visit.position, behavior: 'instant' });
@@ -913,25 +926,36 @@
     void syncStore();
   }
 
-  async function openSpecificFile(path: string, options: { history?: boolean; position?: number; fromEcho?: boolean; standalone?: boolean } = {}) {
-    if (!path) return;
+  async function openSpecificFile(path: string, options: OpenFileOptions = {}) {
+    if (!path) return false;
     const standalone = options.standalone ?? !isWorkspaceFile(path);
-    if (!options.history) {
-      rememberCurrentVisit();
-      if (path !== filePath) addReadingVisit(path, options.fromEcho);
-    }
+    if (!options.history) rememberCurrentVisit();
     const request = ++navigationRequest;
     navigating = true;
+    let html: string;
+    try {
+      // Commit navigation only after the new file can actually be read and rendered.
+      html = renderReadingContent(await readTextFile(path));
+    } catch (error) {
+      if (request !== navigationRequest) return false;
+      navigating = false;
+      readingError = { path, options: { ...options, history: false } };
+      console.error('Unable to open Markdown file:', error);
+      return false;
+    }
+    if (request !== navigationRequest) return false;
+    if (!options.history && path !== filePath) addReadingVisit(path, options.fromEcho);
+    readingError = null;
+    if (unwatch) { unwatch(); unwatch = null; }
     if (compactEchoMode) knowledgeEchoExpanded = false;
     standaloneFilePath = standalone ? path : '';
     filePath = path;
-    getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || t('misc.reader_title'));
+    if ('__TAURI_INTERNALS__' in window) void getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || t('misc.reader_title'));
     recentFiles = [path, ...recentFiles.filter(item => item !== path)].slice(0, 8);
-    pendingScrollPosition = options.position ?? readingProgress[path]?.position ?? 0;
-    await loadContent();
-    if (request !== navigationRequest) return;
+    await loadContent(html, { ...options, position: options.position ?? readingProgress[path]?.position ?? 0 });
+    if (request !== navigationRequest) return false;
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-    if (request !== navigationRequest) return;
+    if (request !== navigationRequest) return false;
     navigating = false;
     const todaySelection = standalone ? undefined : dailyEchoSelections[folderPath];
     if (todaySelection?.day === currentDayKey && todaySelection.document?.path === path) {
@@ -941,7 +965,6 @@
     
     syncStore();
 
-    if (unwatch) unwatch();
     try {
       const stopWatching = await watch(path, () => {
         if (filePath === path) void loadContent();
@@ -951,6 +974,15 @@
     } catch (e) {
       console.warn("Watch file failed:", e);
     }
+    return request === navigationRequest;
+  }
+
+  async function retryReading() {
+    if (!readingError || retryingReading) return;
+    const { path, options } = readingError;
+    retryingReading = true;
+    try { await openSpecificFile(path, options); }
+    finally { retryingReading = false; }
   }
 
   function echoPreferenceKey(sourcePath: string, targetPath: string) {
@@ -1023,9 +1055,45 @@
   function removeCurrentEcho() {
     knowledgeEchoes = knowledgeEchoes.filter((_, index) => index !== knowledgeEchoIndex);
     knowledgeEchoIndex = Math.min(knowledgeEchoIndex, Math.max(knowledgeEchoes.length - 1, 0));
+    if (!knowledgeEchoes.length && compactEchoMode) closeEchoPeek();
+  }
+
+  function openEchoPeek() {
+    echoReturnFocus = document.activeElement as HTMLElement;
+    echoPeekScroll = window.scrollY;
+    knowledgeEchoExpanded = true;
+  }
+
+  function closeEchoPeek() {
+    knowledgeEchoExpanded = false;
+    const position = echoPeekScroll;
+    void tick().then(() => {
+      window.scrollTo({ top: position, behavior: 'instant' });
+      (echoTrigger?.isConnected ? echoTrigger : echoReturnFocus?.isConnected ? echoReturnFocus : null)?.focus({ preventScroll: true });
+    });
+  }
+
+  function collapseEchoSidebar() {
+    knowledgeEchoExpanded = false;
+    void tick().then(() => echoTrigger?.focus({ preventScroll: true }));
+  }
+
+  function showEchoDialog(node: HTMLDialogElement) {
+    node.showModal();
+    node.querySelector<HTMLButtonElement>('.echo-peek__close')?.focus({ preventScroll: true });
+    return { destroy() { if (node.open) node.close(); } };
+  }
+
+  function handleEchoBackdrop(event: MouseEvent) {
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeEchoPeek();
   }
 
   async function openKnowledgeEcho(echo: KnowledgeEcho) {
+    // Dismiss the temporary layer before navigating, without restoring its old scroll.
+    if (compactEchoMode) knowledgeEchoExpanded = false;
     await updateEchoPreference(echo.file_path, {
       openedCount: (echoPreferences[echoPreferenceKey(filePath, echo.file_path)]?.openedCount || 0) + 1,
       lastOpenedAt: Date.now()
@@ -1109,24 +1177,69 @@
   }
 
   function openSearchResult(result: SearchResult, term = searchQuery) {
-    pendingSearchTerm = term.trim();
-    pendingSearchLine = result.line_number;
-    openSpecificFile(result.file_path);
+    void openSpecificFile(result.file_path, { search: { term: term.trim(), line: result.line_number } });
   }
 
   function openGlobalSearch() {
+    if (globalSearchOpen || newWorkspaceOpen) return;
     if (!folderPath || isStandaloneFile) {
       drawerOpen = true;
       return;
     }
+    searchReturnFocus = compactEchoMode && knowledgeEchoExpanded ? (echoTrigger || null) : document.activeElement as HTMLElement;
+    if (compactEchoMode) knowledgeEchoExpanded = false;
+    drawerOpen = false;
     globalSearchOpen = true;
-    searchReturnFocus = document.activeElement as HTMLElement;
     tick().then(() => globalSearchInput?.focus());
   }
 
   function closeGlobalSearch() {
     globalSearchOpen = false;
-    searchReturnFocus?.focus();
+    const returnFocus = searchReturnFocus;
+    void tick().then(() => { if (returnFocus?.isConnected) returnFocus.focus(); });
+  }
+
+  function showSearchDialog(node: HTMLDialogElement) {
+    node.showModal();
+    return { destroy() { if (node.open) node.close(); } };
+  }
+
+  function handleSearchDialogKeys(event: KeyboardEvent) {
+    if (event.key !== 'Tab' || event.isComposing) return;
+    const dialog = event.currentTarget as HTMLDialogElement;
+    const controls = Array.from(dialog.querySelectorAll<HTMLElement>('input, button:not(:disabled)'))
+      .filter(control => control.tabIndex >= 0);
+    if (!controls.length) return;
+    event.preventDefault();
+    const index = controls.indexOf(document.activeElement as HTMLElement);
+    const next = index < 0 ? (event.shiftKey ? controls.length - 1 : 0)
+      : (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+    controls[next].focus();
+  }
+
+  function handleSearchBackdrop(event: MouseEvent) {
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (event.target !== dialog) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeGlobalSearch();
+  }
+
+  function handleSidebarKeys(event: KeyboardEvent) {
+    const target = event.target as HTMLElement;
+    const control = target.closest<HTMLButtonElement>('[data-sidebar-control]');
+    if (!control || event.altKey || event.ctrlKey || event.metaKey) return;
+    const controls = Array.from(control.closest('.sidebar-content')?.querySelectorAll<HTMLButtonElement>('[data-sidebar-control]') || []);
+    const index = controls.indexOf(control);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? controls.length - 1
+        : Math.max(0, Math.min(controls.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+      controls[next]?.focus();
+    } else if (control.dataset.folderPath && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      const path = control.dataset.folderPath;
+      if (collapsedFolders.has(path) === (event.key === 'ArrowRight')) toggleFolder(path);
+    }
   }
 
   function handleSearchKeys(event: KeyboardEvent) {
@@ -1169,7 +1282,7 @@
       .find(element => element.textContent?.toLocaleLowerCase().includes(term.toLocaleLowerCase()));
     if (!target) return;
     highlightSearchMatch(target, term);
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth', block: 'center' });
   }
 
   function highlightSearchMatch(container: Element, term: string) {
@@ -1195,9 +1308,7 @@
   }
 
   function progressPercent(path: string) {
-    const progress = readingProgress[path];
-    if (!progress) return 0;
-    return Math.min(100, Math.round((progress.position / Math.max(progress.total || 1, 1)) * 100));
+    return readingPercent(readingProgress[path]);
   }
 
   function buildDailyEcho(): RediscoveryDocument | null {
@@ -1407,6 +1518,7 @@
       if (filePath) addReadingVisit('');
     }
     navigationRequest += 1;
+    readingError = null;
     navigating = false;
     if (unwatch) { unwatch(); unwatch = null; }
     echoRequestId += 1;
@@ -1425,6 +1537,7 @@
   function closeWorkspace() {
     saveReadingProgress();
     resetReadingHistory();
+    readingError = null;
     if (unwatch) {
       unwatch();
       unwatch = null;
@@ -1473,7 +1586,22 @@
   function scrollTo(id: string) {
     activeHeaderId = id;
     const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
+    if (el) el.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth' });
+  }
+
+  function scrollToFragment(fragment: string) {
+    if (!fragment) {
+      window.scrollTo({ top: 0, behavior: reducedMotion ? 'instant' : 'smooth' });
+      return true;
+    }
+    const article = document.querySelector('.md-reader__markdown-content');
+    const candidates = fragmentCandidates(fragment);
+    const target = Array.from(article?.querySelectorAll<HTMLElement>('[id], a[name]') || [])
+      .find(element => candidates.includes(element.id) || candidates.includes(element.getAttribute('name') || ''));
+    if (!target) return false;
+    if (/^H[1-6]$/.test(target.tagName)) activeHeaderId = target.id;
+    target.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth', block: 'start' });
+    return true;
   }
 
   async function handleMarkdownClick(e: MouseEvent) {
@@ -1499,22 +1627,26 @@
       return;
     }
 
-    // 2. Handle internal relative link clicks
+    // Classify schemes before filesystem resolution; fragments are not filenames.
     const aTag = target.closest('a');
     if (aTag) {
       const href = aTag.getAttribute('href');
-      if (href && !href.startsWith('http') && !href.startsWith('#')) {
-        e.preventDefault();
-        try {
-          const decodedHref = decodeURIComponent(href);
-          const dir = await dirname(filePath);
-          let resolved = await resolve(dir, decodedHref);
-          if (resolved) {
-            openSpecificFile(resolved);
-          }
-        } catch(err) {
-          console.error("Link resolve failed", err);
-        }
+      if (!href) return;
+      e.preventDefault();
+      const link = parseReadingLink(href);
+      try {
+        if (link.kind === 'external') await openUrl(link.url);
+        else if (link.kind === 'anchor') {
+          if (!scrollToFragment(link.fragment)) showToast(t('reading.anchor_missing'));
+        } else if (link.kind === 'markdown') {
+          const resolved = await resolve(await dirname(filePath), link.path);
+          if (normalizedPath(resolved) === normalizedPath(filePath) && link.fragment !== undefined) {
+            if (!scrollToFragment(link.fragment)) showToast(t('reading.anchor_missing'));
+          } else await openSpecificFile(resolved, { anchor: link.fragment });
+        } else showToast(t('reading.link_unsupported'));
+      } catch (error) {
+        console.error('Unable to open link:', error);
+        showToast(t('reading.link_failed'));
       }
     }
   }
@@ -1557,6 +1689,47 @@
   }
 </script>
 
+{#snippet echoPreview()}
+  {#if knowledgeEchoLoading}
+    <div class="knowledge-echo__loading" aria-live="polite">
+      <span></span><span></span><span></span><p>{t('echo.listening')}</p>
+    </div>
+  {:else if currentKnowledgeEcho()}
+    {@const echo = currentKnowledgeEcho()!}
+    <div class="knowledge-echo__body">
+      <div class="knowledge-echo__meta">
+        <span>{t('echo.from_past')}</span>
+        {#if knowledgeEchoes.length > 1}
+          <button onclick={showNextEcho} aria-label={t('echo.next')}>{knowledgeEchoIndex + 1} / {knowledgeEchoes.length}<i aria-hidden="true">→</i></button>
+        {/if}
+      </div>
+      <button class="knowledge-echo__document" onclick={() => openKnowledgeEcho(echo)}>
+        <strong>{echo.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
+        <small>{echoContext(echo)}</small>
+        <blockquote>{echo.snippet || t('echo.no_preview')}</blockquote>
+      </button>
+      {#if echo.matched_terms.length}
+        <div class="knowledge-echo__terms" aria-label={t('echo.shared_ideas')}>
+          {#each echo.matched_terms.slice(0, 3) as term}<span>{term}</span>{/each}
+        </div>
+      {/if}
+      <button class="knowledge-echo__open" onclick={() => openKnowledgeEcho(echo)}>{t('echo.open')}<span aria-hidden="true">↗</span></button>
+      <div class="knowledge-echo__feedback">
+        <button onclick={() => markEchoHelpful(echo)}>♡ {t('echo.helpful')}</button>
+        <button onclick={() => snoozeKnowledgeEcho(echo)}>{t('echo.later')}</button>
+        <button onclick={() => dismissKnowledgeEcho(echo)}>{t('echo.not_related')}</button>
+      </div>
+      {#if compactEchoMode && toastMessage}<p class="knowledge-echo__notice" role="status">{toastMessage}</p>{/if}
+      <p class="knowledge-echo__privacy"><span aria-hidden="true">●</span>{t('echo.local')}</p>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet searchExcerpt(text: string, query: string)}
+  {#each highlightParts(text, query) as part}
+    {#if part.matched}<mark class="result-highlight">{part.text}</mark>{:else}{part.text}{/if}
+  {/each}
+{/snippet}
 
 <div class="md-reader" style="--side-width: {sidebarWidth}px;">
   {#if folderPath || filePath}
@@ -1582,25 +1755,26 @@
     <div class="sidebar-content">
       {#if sidebarTab === 'files'}
         <div class="sidebar-search">
-          <input type="text" bind:value={searchQuery} placeholder={t('sidebar.search_placeholder')} class="search-input" />
+          <input type="search" bind:value={searchQuery} aria-label={t('search.title')} placeholder={t('sidebar.search_placeholder')} class="search-input" />
         </div>
+        <p class="visually-hidden" role="status" aria-live="polite">{isSearching ? t('search.loading') : sidebarSearchError ? t('search.failed') : searchQuery.trim() && searchResults.length === 0 ? t('search.empty') : ''}</p>
         <ul style="margin:0; padding:0; list-style: none;">
           {#if searchQuery.trim() !== ''}
              {#if isSearching}
-               <li class="sidebar-empty">Searching full text...</li>
+               <li class="sidebar-empty">{t('search.loading')}</li>
+             {:else if sidebarSearchError}
+               <li class="sidebar-empty"><p>{t('search.failed')}</p><button class="search-retry" onclick={() => sidebarSearchRetry += 1}>{t('reading.retry')}</button></li>
              {:else if searchResults.length === 0}
-               <li class="sidebar-empty">No matching text found.</li>
+               <li class="sidebar-empty">{t('search.empty')}</li>
              {:else}
-               {#each searchResults as res}
-                 <!-- svelte-ignore a11y_click_events_have_key_events -->
-                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                 <li class="search-item {filePath === res.file_path ? 'active-file' : ''}" onclick={(e) => { e.stopPropagation(); openSearchResult(res); }}>
-                   <div class="search-item__title">
-                     <span>✦ {res.file_name}</span><span class="search-item__line">L{res.line_number}</span>
-                   </div>
-                   <div class="search-item__snippet">
-                     {res.snippet}
-                   </div>
+               {#each sidebarSearchGroups as group}
+                 <li class="search-group">
+                   <div class="search-group__heading"><strong>{group.file_name}</strong><small title={group.file_path}>{documentContext(group.file_path, sourcePaths)}</small></div>
+                   {#each group.matches as res}
+                     <button class="search-item {filePath === res.file_path ? 'active-file' : ''}" aria-label={`${group.file_name} · L${res.line_number} · ${res.snippet}`} data-sidebar-control onkeydown={handleSidebarKeys} onclick={() => openSearchResult(res)}>
+                       <span class="search-item__line">L{res.line_number}</span><span class="search-item__snippet">{@render searchExcerpt(res.snippet, searchQuery)}</span>
+                     </button>
+                   {/each}
                  </li>
                {/each}
              {/if}
@@ -1610,20 +1784,18 @@
              {:else}
                 {#each visibleTreeFiles as f}
                   {#if f.isDir}
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <li class:folder-item--source={f.isSource} class="folder-item" style="padding-left: {16 + (f.depth - 1) * 12}px" onclick={() => toggleFolder(f.path)}>
-                      <span class="folder-arrow">{collapsedFolders.has(f.path) ? '›' : '⌄'}</span>
-                      <span class="file-icon file-icon--folder">{f.isSource ? '↗' : ''}</span>
+                    <li><button class:folder-item--source={f.isSource} class="folder-item" data-sidebar-control data-folder-path={f.path} aria-expanded={!collapsedFolders.has(f.path)} onkeydown={handleSidebarKeys} style="padding-left: {16 + (f.depth - 1) * 12}px" onclick={() => toggleFolder(f.path)}>
+                      <span class="folder-arrow" aria-hidden="true">{collapsedFolders.has(f.path) ? '›' : '⌄'}</span>
+                      <span class="file-icon file-icon--folder" aria-hidden="true">{f.isSource ? '↗' : ''}</span>
                       <span class="file-name" title={f.name}>{f.isSource ? t('workspace.linked_source') + ' · ' : ''}{f.name}</span>
-                    </li>
+                    </button></li>
                   {:else}
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                    <li class:file-item--source={f.isSource} class="file-item {filePath === f.path ? 'active-file' : ''}" style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(e) => { e.stopPropagation(); openSpecificFile(f.path); }}>
-                      <span class="file-icon file-icon--document"></span>
+                    <li class:file-item--source={f.isSource} class="file-item {filePath === f.path ? 'active-file' : ''}">
+                      <button class="file-open" data-sidebar-control aria-current={filePath === f.path ? 'page' : undefined} onkeydown={handleSidebarKeys} style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={() => openSpecificFile(f.path)}>
+                      <span class="file-icon file-icon--document" aria-hidden="true"></span>
                       <span class="file-name" title={f.name}>{f.isSource ? '↗ ' + t('workspace.linked_note') + ' · ' : ''}{f.name}</span>
-                      <button class:visible={pinnedFiles.includes(f.path)} class="pin-button" aria-label={pinnedFiles.includes(f.path) ? t('workspace.unpin') : t('workspace.pin')} onclick={(e) => { e.stopPropagation(); togglePin(f.path); }}>✦</button>
+                      </button>
+                      <button class:visible={pinnedFiles.includes(f.path)} class="pin-button" aria-label={`${pinnedFiles.includes(f.path) ? t('workspace.unpin') : t('workspace.pin')} ${f.name}`} onclick={() => togglePin(f.path)}>✦</button>
                     </li>
                   {/if}
                 {/each}
@@ -1662,11 +1834,20 @@
       <span class="reading-toolbar__divider" aria-hidden="true"></span>
       <button disabled={navigating || readingHistoryIndex === 0} aria-label={t('navigation.back')} title={t('navigation.back') + ' · Alt + ←'} onclick={() => navigateReadingHistory(-1)}>←</button>
       <button disabled={navigating || readingHistoryIndex >= readingHistory.length - 1} aria-label={t('navigation.forward')} title={t('navigation.forward') + ' · Alt + →'} onclick={() => navigateReadingHistory(1)}>→</button>
+      {#if filePath && (compactEchoMode || !knowledgeEchoExpanded) && knowledgeEchoes.length > 0}
+        <button bind:this={echoTrigger} class="reading-toolbar__echo" onclick={() => compactEchoMode ? openEchoPeek() : knowledgeEchoExpanded = true} aria-label={compactEchoLabel()} aria-haspopup={compactEchoMode ? 'dialog' : undefined} aria-controls={compactEchoMode ? 'echo-peek' : 'echo-sidebar-content'} aria-expanded={knowledgeEchoExpanded}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M7 5a9 9 0 0 0 0 14M17 5a9 9 0 0 1 0 14"/></svg><span>{t('echo.title')}</span><small>{knowledgeEchoes.length}</small></button>
+      {/if}
       <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath || isStandaloneFile} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
       {#if readingHistory[readingHistoryIndex]?.fromEcho && readingHistoryIndex > 0}
         <button class="reading-toolbar__return" disabled={navigating} onclick={() => navigateReadingHistory(-1)}>{t('navigation.return_reading')}</button>
       {/if}
     </nav>
+    {/if}
+    {#if readingError}
+      <aside class="reading-error" role="alert" aria-label={t('reading.failed_title')}>
+        <div><strong>{t('reading.failed_title')}</strong><span class="reading-error__path">{sourceName(readingError.path)}</span><p>{t('reading.failed_hint')}</p></div>
+        <div class="reading-error__actions"><button onclick={retryReading} disabled={retryingReading}>{retryingReading ? t('reading.retrying') : t('reading.retry')}</button><button onclick={() => readingError = null}>{filePath ? t('reading.dismiss') : t('reading.dismiss_empty')}</button></div>
+      </aside>
     {/if}
     {#if !filePath}
       <div class:workspace-home={Boolean(folderPath)} class="welcome">
@@ -1676,7 +1857,13 @@
         {#if folderPath}
           <p class="welcome__eyebrow">{t('workspace.eyebrow')}</p>
           <h2>{workspaceName}</h2>
-          <p class="welcome__subtitle">{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
+          <p class="welcome__subtitle" title={folderPath}>{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
+          {#if resumeDocument}
+            <button class="workspace-resume" onclick={() => openSpecificFile(resumeDocument.path)}>
+              <span class="workspace-resume__body"><span class="workspace-resume__action">{t('workspace.resume')}</span><strong>{resumeDocument.name.replace(/\.(md|markdown|mdx)$/i, '')}</strong><small>{t('workspace.last_read')}{formatLastRead(resumeDocument.path)} · {progressPercent(resumeDocument.path)}%</small></span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+            </button>
+          {/if}
           <div class="workspace-sources" aria-label={t('workspace.sources')}>
             <span>{t('workspace.primary_source')}: {sourceName(folderPath)}</span>
             {#each linkedSourcePaths as source}
@@ -1687,13 +1874,6 @@
             {/each}
             <button class="workspace-sources__add" onclick={addLinkedFolder}>＋ {t('workspace.add_source')}</button>
           </div>
-          {#if showFeedbackNudge}
-            <aside class="feedback-nudge" aria-label={t('feedback.nudge_title')}>
-              <span class="feedback-nudge__mark">◌</span>
-              <div><small>{t('feedback.nudge_eyebrow')}</small><strong>{t('feedback.nudge_title')}</strong><p>{t('feedback.nudge_text')}</p></div>
-              <div class="feedback-nudge__actions"><button onclick={() => sendFeedback('after-reading')}>{t('feedback.nudge_share')}</button><button onclick={dismissFeedbackNudge}>{t('feedback.nudge_later')}</button></div>
-            </aside>
-          {/if}
           <div class="workspace-grid">
             <section class="workspace-card workspace-card--daily-echo">
               <div class="daily-echo__heading">
@@ -1754,16 +1934,16 @@
                 <button class="rediscovery-reset" onclick={resetRediscovery}>{t('rediscovery.restore')} ({hiddenRediscoveryCount})</button>
               {/if}
             </section>
+            {#if moreContinueDocuments.length}
             <section class="workspace-card workspace-card--continue">
               <div class="workspace-card__heading"><span>↳</span><h3>{t('workspace.continue')}</h3></div>
-              {#if continueDocuments.length}
                 <div class="document-list">
-                  {#each continueDocuments as doc}
+                  {#each moreContinueDocuments as doc}
                     <button onclick={() => openSpecificFile(doc.path)}><span>{doc.name}</span><small>{t('workspace.last_read')}{formatLastRead(doc.path)} · {progressPercent(doc.path)}%</small><i class="document-list__progress"><i style="width: {progressPercent(doc.path)}%"></i></i></button>
                   {/each}
                 </div>
-              {:else}<p class="workspace-card__empty">{t('workspace.empty_continue')}</p>{/if}
             </section>
+            {/if}
             <section class="workspace-card workspace-card--pinned">
               <div class="workspace-card__heading"><span>✦</span><h3>{t('workspace.pinned')}</h3></div>
               {#if pinnedDocuments.length}
@@ -1785,6 +1965,13 @@
               {:else}<p class="workspace-card__empty">{t('workspace.empty_recent')}</p>{/if}
             </section>
           </div>
+          {#if showFeedbackNudge}
+            <aside class="feedback-nudge" aria-label={t('feedback.nudge_title')}>
+              <span class="feedback-nudge__mark">◌</span>
+              <div><small>{t('feedback.nudge_eyebrow')}</small><strong>{t('feedback.nudge_title')}</strong><p>{t('feedback.nudge_text')}</p></div>
+              <div class="feedback-nudge__actions"><button onclick={() => sendFeedback('after-reading')}>{t('feedback.nudge_share')}</button><button onclick={dismissFeedbackNudge}>{t('feedback.nudge_later')}</button></div>
+            </aside>
+          {/if}
           <button class="workspace-change" onclick={openFolder}>{t('workspace.change_folder')}</button>
         {:else}
           <p class="welcome__eyebrow">{t('misc.reader_title')} / READING SPACE</p>
@@ -1810,9 +1997,9 @@
       {#if isStandaloneFile}
         <div class="reading-context reading-context--standalone"><span>⌁ {t('workspace.standalone')}</span><span>{sourceName(filePath)}</span>{#if folderPath}<button onclick={addCurrentFileToWorkspace}>＋ {t('workspace.add_current_file')}</button>{/if}</div>
       {:else if folderPath}
-        <div class="reading-context"><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
+        <div class:reading-context--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)} class="reading-context"><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
-      <div class:reading-shell--with-echo={knowledgeEchoLoading || knowledgeEchoes.length > 0} class="reading-shell">
+      <div class:reading-shell--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)} class="reading-shell">
         {#key filePath}
           {#if showSingleReadingGuide}
             <aside class="single-reading-guide" aria-label={t('first_reading.title')}>
@@ -1828,47 +2015,15 @@
             {@html markdownHtml}
           </div>
         {/key}
-        {#if knowledgeEchoLoading || knowledgeEchoes.length > 0}
-          <aside class:knowledge-echo--collapsed={!knowledgeEchoExpanded} class:knowledge-echo--compact={compactEchoMode} class="knowledge-echo" aria-label={t('echo.title')}>
-            <button class="knowledge-echo__toggle" onclick={() => knowledgeEchoExpanded = !knowledgeEchoExpanded} aria-expanded={knowledgeEchoExpanded}>
-              <span class="knowledge-echo__symbol">◌</span>
-              <span><small>{t('misc.reader_title')}</small><strong>{compactEchoMode ? compactEchoLabel() : t('echo.title')}</strong></span>
-              <i>{knowledgeEchoExpanded ? '−' : '+'}</i>
+        {#if !compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)}
+          <aside class="knowledge-echo" aria-label={t('echo.title')}>
+            <button bind:this={echoTrigger} class="knowledge-echo__toggle" onclick={collapseEchoSidebar} aria-controls="echo-sidebar-content" aria-expanded="true">
+              <span class="knowledge-echo__symbol" aria-hidden="true">◌</span>
+              <strong>{compactEchoMode ? compactEchoLabel() : t('echo.title')}</strong>
+              <i aria-hidden="true">{!compactEchoMode && knowledgeEchoExpanded ? '−' : '+'}</i>
             </button>
-            {#if knowledgeEchoExpanded}
-              {#if knowledgeEchoLoading}
-                <div class="knowledge-echo__loading" aria-live="polite">
-                  <span></span><span></span><span></span>
-                  <p>{t('echo.listening')}</p>
-                </div>
-              {:else if currentKnowledgeEcho()}
-                {@const echo = currentKnowledgeEcho()!}
-                <div class="knowledge-echo__body">
-                  <div class="knowledge-echo__meta">
-                    <span>{t('echo.from_past')}</span>
-                    {#if knowledgeEchoes.length > 1}
-                      <button onclick={showNextEcho} aria-label={t('echo.next')}>{knowledgeEchoIndex + 1} / {knowledgeEchoes.length}<i>→</i></button>
-                    {/if}
-                  </div>
-                  <button class="knowledge-echo__document" onclick={() => openKnowledgeEcho(echo)}>
-                    <strong>{echo.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
-                    <small>{echoContext(echo)}</small>
-                    <blockquote>{echo.snippet || t('echo.no_preview')}</blockquote>
-                  </button>
-                  {#if echo.matched_terms.length}
-                    <div class="knowledge-echo__terms" aria-label={t('echo.shared_ideas')}>
-                      {#each echo.matched_terms.slice(0, 3) as term}<span>{term}</span>{/each}
-                    </div>
-                  {/if}
-                  <button class="knowledge-echo__open" onclick={() => openKnowledgeEcho(echo)}>{t('echo.open')}<span>↗</span></button>
-                  <div class="knowledge-echo__feedback">
-                    <button onclick={() => markEchoHelpful(echo)}>♡ {t('echo.helpful')}</button>
-                    <button onclick={() => snoozeKnowledgeEcho(echo)}>{t('echo.later')}</button>
-                    <button onclick={() => dismissKnowledgeEcho(echo)}>{t('echo.not_related')}</button>
-                  </div>
-                  <p class="knowledge-echo__privacy"><span>●</span>{t('echo.local')}</p>
-                </div>
-              {/if}
+            {#if !compactEchoMode && knowledgeEchoExpanded}
+              <div id="echo-sidebar-content">{@render echoPreview()}</div>
             {/if}
           </aside>
         {/if}
@@ -1876,6 +2031,14 @@
     {/if}
   </div>
 </div>
+
+{#if filePath && compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length)}
+  <dialog id="echo-peek" class="echo-peek" use:showEchoDialog onkeydown={handleSearchDialogKeys} oncancel={(event) => { event.preventDefault(); closeEchoPeek(); }} onclick={handleEchoBackdrop} aria-labelledby="echo-peek-title" aria-describedby="echo-peek-hint">
+    <header class="echo-peek__heading"><div><h2 id="echo-peek-title">{t('echo.title')}</h2><p id="echo-peek-hint">{t('echo.peek_hint')}</p></div><button class="echo-peek__close" aria-label={t('echo.close')} onclick={closeEchoPeek}><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.5" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></header>
+    {@render echoPreview()}
+    <footer class="echo-peek__footer"><button onclick={closeEchoPeek}>{t('echo.close')}<kbd>Esc</kbd></button></footer>
+  </dialog>
+{/if}
 
 {#if isFileDragOver}
   <div class="file-drop-overlay" aria-live="polite">
@@ -1911,25 +2074,30 @@
 </button>
 
 {#if globalSearchOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="command-overlay" transition:fade={{ duration: reducedMotion ? 0 : 160 }} onclick={closeGlobalSearch}></div>
-  <dialog class="command-palette" transition:fly={{ y: -12, duration: reducedMotion ? 0 : 220, easing: cubicOut }} open aria-label={t('search.title')}>
-    <div class="command-palette__input"><span>⌕</span><input bind:this={globalSearchInput} bind:value={globalSearchQuery} onkeydown={handleSearchKeys} role="combobox" aria-label={t('search.title')} aria-autocomplete="list" aria-expanded="true" aria-controls="search-results" aria-activedescendant={!isGlobalSearching && globalSearchResults.length ? `search-result-${selectedSearchIndex}` : undefined} placeholder={t('search.hint')} /><kbd>ESC</kbd></div>
+  <dialog class="command-palette" use:showSearchDialog onkeydown={handleSearchDialogKeys} oncancel={(event) => { event.preventDefault(); closeGlobalSearch(); }} onclick={handleSearchBackdrop} aria-label={t('search.title')}>
+    <div class="command-palette__input"><span aria-hidden="true">⌕</span><input bind:this={globalSearchInput} bind:value={globalSearchQuery} onkeydown={handleSearchKeys} role="combobox" aria-label={t('search.title')} aria-autocomplete="list" aria-expanded="true" aria-controls="search-results" aria-activedescendant={!isGlobalSearching && !globalSearchError && globalSearchResults.length ? `search-result-${selectedSearchIndex}` : undefined} placeholder={t('search.hint')} /><button class="command-palette__close" onclick={closeGlobalSearch} aria-label={t('search.close')}><kbd>ESC</kbd></button></div>
+    <p class="visually-hidden" role="status" aria-live="polite">{isGlobalSearching ? t('search.loading') : !globalSearchError && globalSearchQuery.trim() && globalSearchResults.length === 0 ? t('search.empty') : ''}</p>
+    {#if globalSearchError}
+      <div class="command-palette__empty" role="alert"><p>{t('search.failed')}</p><button class="search-retry" onclick={() => { globalSearchRetry += 1; globalSearchInput?.focus(); }}>{t('reading.retry')}</button></div>
+    {/if}
     <div class="command-palette__results" id="search-results" role="listbox" aria-label={t('search.title')}>
       {#if globalSearchQuery.trim() === ''}
         <p class="command-palette__empty">{t('search.open_hint')}</p>
       {:else if isGlobalSearching}
         <p class="command-palette__empty">{t('search.loading')}</p>
-      {:else if globalSearchError}
-        <p class="command-palette__empty" role="alert">{t('search.failed')}</p>
-      {:else if globalSearchResults.length === 0}
+      {:else if !globalSearchError && globalSearchResults.length === 0}
         <p class="command-palette__empty">{t('search.empty')}</p>
       {:else}
-        {#each globalSearchResults as result, index}
-          <button id={`search-result-${index}`} role="option" aria-selected={index === selectedSearchIndex} tabindex="-1" class:command-result--selected={index === selectedSearchIndex} class="command-result" onclick={() => { openSearchResult(result, globalSearchQuery); closeGlobalSearch(); }}>
-            <span class="command-result__icon">✦</span><span class="command-result__body"><strong>{result.file_name}</strong><small>{result.snippet}</small></span><span class="command-result__line">L{result.line_number}</span>
-          </button>
+        {#each globalSearchGroups as group, groupIndex}
+          <div class="command-group" role="group" aria-labelledby={`search-group-${groupIndex}`}>
+            <div class="command-group__heading" id={`search-group-${groupIndex}`}><strong>{group.file_name}</strong><small title={group.file_path}>{documentContext(group.file_path, sourcePaths)}</small></div>
+            {#each group.matches as result}
+              {@const index = globalSearchResults.findIndex(hit => hit.file_path === result.file_path && hit.line_number === result.line_number)}
+              <button id={`search-result-${index}`} role="option" aria-selected={index === selectedSearchIndex} aria-describedby={`search-group-${groupIndex}`} tabindex="-1" class:command-result--selected={index === selectedSearchIndex} class="command-result" onclick={() => { openSearchResult(result, globalSearchQuery); closeGlobalSearch(); }}>
+                <span class="command-result__line">L{result.line_number}</span><span class="command-result__body"><span class="command-result__snippet">{@render searchExcerpt(result.snippet, globalSearchQuery)}</span></span>
+              </button>
+            {/each}
+          </div>
         {/each}
       {/if}
     </div>
@@ -2029,6 +2197,8 @@
   .reading-toolbar .reading-toolbar__return { margin-left: 8px; min-width: 0; font-size: 12px; color: var(--color-primary); }
   .reading-toolbar .reading-toolbar__search { margin-left: auto; gap: 10px; font-size: 12px; }
   .reading-toolbar__search kbd { color: var(--color-text-gray); font-size: 10px; }
+  .reading-toolbar .reading-toolbar__echo { gap: 7px; margin-left: 8px; color: var(--color-primary); font-size: 12px; }
+  .reading-toolbar__echo small { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; background: var(--color-primary-alpha-10); font-size: 11px; font-variant-numeric: tabular-nums; }
   .command-result--selected { background: var(--color-primary-alpha-10) !important; box-shadow: inset 2px 0 var(--color-primary); }
   @media (max-width: 700px) { .reading-toolbar__search kbd { display: none; } .reading-toolbar { flex-wrap: wrap; } }
   .reading-toolbar + .welcome { min-height: calc(100vh - 52px); }
@@ -2160,8 +2330,21 @@
   .workspace-modal__error { margin-top: 8px; color: var(--color-danger); font-size: 11px; }
   .workspace-modal__actions { display: grid; grid-template-columns: .75fr 1.25fr; gap: 9px; margin-top: 22px; }
   @keyframes modalIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 9px)) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
-  .command-overlay { position: fixed; inset: 0; z-index: 120; background: color-mix(in srgb, var(--color-text-primary) 16%, transparent); backdrop-filter: blur(7px); }
-  .command-palette { position: fixed; top: min(18vh, 160px); left: 50%; z-index: 121; width: min(620px, calc(100vw - 32px)); overflow: hidden; border: 1px solid var(--color-border); border-radius: 18px; background: color-mix(in srgb, var(--color-side-bg) 94%, transparent); box-shadow: 0 24px 70px color-mix(in srgb, var(--color-text-primary) 25%, transparent); transform: translateX(-50%); backdrop-filter: blur(30px) saturate(150%); -webkit-backdrop-filter: blur(30px) saturate(150%); animation: paletteIn .2s cubic-bezier(.2,.8,.2,1); }
+  .command-palette { position: fixed; top: min(18vh, 160px); left: 50%; z-index: 121; width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - min(18vh, 160px) - 24px); margin: 0; padding: 0; overflow: hidden; color: var(--color-text-primary); border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-side-bg); box-shadow: 0 24px 70px color-mix(in srgb, var(--color-text-primary) 25%, transparent); transform: translateX(-50%); animation: paletteIn .2s cubic-bezier(.2,.8,.2,1); }
+  .command-palette::backdrop { background: color-mix(in srgb, var(--color-text-primary) 16%, transparent); backdrop-filter: blur(7px); }
+  .command-palette__input:focus-within { box-shadow: inset 0 -2px var(--color-primary); }
+  .command-palette__close { flex: none; padding: 4px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .search-retry { padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-primary); background: var(--color-primary-alpha-10); cursor: pointer; font: inherit; }
+  .reading-error { position: fixed; top: 68px; right: 24px; z-index: 110; display: flex; align-items: center; gap: 18px; width: min(580px, calc(100vw - 48px)); padding: 18px; border: 1px solid var(--color-border); border-radius: 14px; color: var(--color-text-primary); background: var(--color-side-bg); box-shadow: 0 12px 32px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
+  .reading-error > div:first-child { min-width: 0; flex: 1; }
+  .reading-error strong { display: block; font-size: 14px; }
+  .reading-error__path { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; color: var(--color-text-secondary); }
+  .reading-error p { margin: 6px 0 0; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
+  .reading-error__actions { display: grid; gap: 8px; }
+  .reading-error__actions button { padding: 7px 10px; border: 0; border-radius: 8px; color: var(--color-primary); background: var(--color-primary-alpha-10); white-space: nowrap; cursor: pointer; font: 600 12px var(--font-family-body); }
+  .reading-error__actions button:last-child { color: var(--color-text-secondary); background: transparent; }
+  .reading-error__actions button:disabled { opacity: .6; cursor: wait; }
   .command-palette__input { display: flex; align-items: center; gap: 12px; padding: 15px 16px; border-bottom: 1px solid var(--color-border); color: var(--color-primary); }
   .command-palette__input > span { font-size: 25px; line-height: 1; }
   .command-palette__input input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--color-text-primary); background: transparent; font: 500 15px var(--font-family-body); }
@@ -2171,12 +2354,15 @@
   .command-palette__empty { margin: 0; padding: 24px 13px; color: var(--color-text-gray); font-size: 12px; text-align: center; }
   .command-result { display: flex; align-items: flex-start; width: 100%; gap: 10px; padding: 10px; border: 0; border-radius: 10px; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; transition: background .15s ease; }
   .command-result:hover { background: var(--color-primary-alpha-10); }
-  .command-result__icon { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; color: var(--color-primary); background: var(--color-primary-alpha-10); }
   .command-result__body { display: grid; min-width: 0; gap: 3px; }
-  .command-result__body strong, .command-result__body small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .command-result__body strong { font-size: 12px; }
-  .command-result__body small { color: var(--color-text-gray); font: 11px var(--font-family-code); }
-  .command-result__line { margin-left: auto; padding-top: 3px; color: var(--color-text-gray); font-size: 10px; }
+  .command-result__snippet { display: -webkit-box; overflow: hidden; color: var(--color-text-secondary); font-size: 13px; line-height: 1.65; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .command-group + .command-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--color-border); }
+  .command-group__heading { display: grid; gap: 4px; padding: 9px 13px 5px; }
+  .command-group__heading strong { color: var(--color-text-primary); font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+  .command-group__heading small { overflow: hidden; color: var(--color-text-gray); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .result-highlight { padding: 0 1px; border-radius: 2px; color: inherit; background: var(--color-mark); font-weight: 650; }
+  .command-result__line { flex: none; width: 28px; padding-top: 3px; color: var(--color-text-gray); font-size: 10px; font-variant-numeric: tabular-nums; }
+  .command-result__body { flex: 1; }
   @keyframes paletteIn { from { opacity: 0; transform: translate(-50%, -8px) scale(.98); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
   
   /* Sidebar Tabs */
@@ -2239,16 +2425,16 @@
   }
   .file-item {
     margin: 2px 8px;
-    padding: 9px 10px;
+    padding: 0;
     cursor: pointer;
     font-size: 13px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 0;
     border-left: 2px solid transparent;
     border-radius: 8px;
     color: var(--color-text-secondary);
-    transition: all 0.15s;
+    transition: background 0.15s, color 0.15s;
   }
   .file-item:hover {
     background: var(--color-primary-alpha-10);
@@ -2259,6 +2445,7 @@
     color: var(--color-primary);
     font-weight: 500;
   }
+  .file-open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 36px; padding: 9px 10px; border: 0; border-radius: 7px; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
   .file-icon { font-size: 12px; }
   .file-icon--document { position: relative; width: 13px; height: 15px; flex: none; border: 1px solid currentColor; border-radius: 3px; color: var(--color-text-gray); opacity: .8; }
   .file-icon--document::after { position: absolute; right: 2px; bottom: 3px; left: 2px; height: 1px; background: currentColor; content: ''; box-shadow: 0 -3px 0 currentColor; }
@@ -2270,17 +2457,21 @@
     white-space: nowrap;
     flex: 1;
   }
-  .pin-button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; cursor: pointer; opacity: 0; }
-  .file-item:hover .pin-button, .pin-button.visible { opacity: 1; }
+  .pin-button { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; margin-right: 6px; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; cursor: pointer; opacity: 0; }
+  .file-item:hover .pin-button, .file-item:focus-within .pin-button, .pin-button.visible { opacity: 1; }
   .pin-button:hover, .pin-button.visible { color: var(--color-primary); background: var(--color-primary-alpha-10); }
-  .folder-item { display: flex; align-items: center; gap: 6px; padding-top: 10px; padding-bottom: 5px; color: var(--color-primary); font-size: 12px; font-weight: 700; cursor: pointer; user-select: none; }
+  .folder-item { display: flex; align-items: center; width: 100%; gap: 6px; min-height: 36px; padding-top: 10px; padding-bottom: 5px; padding-right: 12px; border: 0; color: var(--color-primary); background: transparent; font: 700 12px var(--font-family-body); text-align: left; cursor: pointer; user-select: none; }
+  .folder-item:hover { background: var(--color-primary-alpha-10); }
   .folder-arrow { width: 10px; color: var(--color-text-gray); font-size: 16px; line-height: 1; }
   .sidebar-empty { padding: 18px 22px; color: var(--color-text-gray); font-size: 12px; }
-  .search-item { padding: 12px 16px; border-bottom: 1px solid var(--color-side-border); cursor: pointer; transition: background .15s ease; }
+  .search-item { display: block; width: 100%; padding: 12px 16px; border: 0; border-bottom: 1px solid var(--color-side-border); color: inherit; background: transparent; text-align: left; cursor: pointer; transition: background .15s ease; }
   .search-item:hover { background: var(--color-primary-alpha-10); }
-  .search-item__title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: var(--color-primary); font-size: 12px; font-weight: 700; }
+  .search-group + .search-group { border-top: 1px solid var(--color-border); }
+  .search-group__heading { display: grid; gap: 4px; padding: 12px 16px 4px; }
+  .search-group__heading strong { color: var(--color-text-primary); font-size: 12px; overflow-wrap: anywhere; }
+  .search-group__heading small { overflow: hidden; color: var(--color-text-gray); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
   .search-item__line { color: var(--color-text-gray); font-size: 10px; font-weight: 500; }
-  .search-item__snippet { color: var(--color-text-gray); font: 11px/1.5 var(--font-family-code); word-break: break-word; }
+  .search-item__snippet { display: block; margin-top: 4px; color: var(--color-text-secondary); font: 12px/1.65 var(--font-family-body); overflow-wrap: anywhere; }
   .welcome { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 32px; overflow: hidden; text-align: center; color: var(--color-text-primary); }
   .welcome__orb { position: absolute; z-index: -1; border-radius: 999px; filter: blur(4px); opacity: .8; }
   .welcome__orb--one { width: 360px; height: 360px; top: 9%; left: 11%; background: var(--color-primary-alpha-10); }
@@ -2311,7 +2502,14 @@
   .workspace-home { justify-content: flex-start; align-items: flex-start; padding: clamp(56px, 10vh, 112px) clamp(28px, 7vw, 90px); text-align: left; }
   .workspace-home .welcome__mark { width: 56px; height: 56px; margin-bottom: 19px; border-radius: 18px; }
   .workspace-home .welcome__mark span { font-size: 24px; }
-  .workspace-home .welcome__subtitle { max-width: 620px; margin: 12px 0 34px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace-home .welcome__subtitle { max-width: 100%; margin: 8px 0 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace-resume { display: flex; align-items: center; justify-content: space-between; gap: 24px; width: min(920px, 100%); margin: 0 0 20px; padding: 16px 20px; border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--color-border)); border-radius: 12px; color: var(--color-text-primary); background: var(--color-primary-alpha-10); cursor: pointer; text-align: left; font-family: var(--font-family-body); transition: background .18s ease; }
+  .workspace-resume:hover { background: color-mix(in srgb, var(--color-primary) 13%, var(--color-bg)); }
+  .workspace-resume__body { display: grid; gap: 5px; min-width: 0; }
+  .workspace-resume__action { color: var(--color-primary); font-size: 12px; font-weight: 650; }
+  .workspace-resume strong { overflow: hidden; color: var(--color-text-primary); text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 650; }
+  .workspace-resume small { color: var(--color-text-secondary); font-size: 11px; }
+  .workspace-resume svg { flex: none; color: var(--color-primary); }
   .workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(800px, 100%); gap: 14px; }
   .workspace-card { min-height: 190px; padding: 20px; border: 1px solid var(--color-border); border-radius: 16px; background: color-mix(in srgb, var(--color-bg) 82%, transparent); box-shadow: 0 16px 38px color-mix(in srgb, var(--color-text-primary) 5%, transparent); }
   .workspace-card--pinned { border-color: color-mix(in srgb, var(--color-primary) 35%, var(--color-border)); }
@@ -2382,54 +2580,46 @@
   .md-reader__body { container-name: reading-area; container-type: inline-size; }
   .reading-shell { width: 100%; }
   .reading-shell > .md-reader__markdown-content { width: 100%; }
-  .knowledge-echo { position: fixed; right: 24px; bottom: 86px; z-index: 76; isolation: isolate; width: min(320px, calc(100vw - 40px)); max-height: calc(100vh - 118px); margin: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); border-radius: 19px; color: var(--color-text-primary); background: linear-gradient(145deg, color-mix(in srgb, var(--color-side-bg) 94%, transparent), color-mix(in srgb, var(--color-primary-alpha-10) 68%, var(--color-bg))); box-shadow: 0 20px 48px color-mix(in srgb, var(--color-text-primary) 13%, transparent); backdrop-filter: blur(24px) saturate(135%); animation: echoEnter .42s cubic-bezier(.16,1,.3,1); }
+  .knowledge-echo { position: sticky; top: 76px; z-index: 4; isolation: isolate; width: 278px; max-height: calc(100vh - 100px); margin: 0; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); border-radius: 19px; color: var(--color-text-primary); background: linear-gradient(145deg, color-mix(in srgb, var(--color-side-bg) 94%, transparent), color-mix(in srgb, var(--color-primary-alpha-10) 68%, var(--color-bg))); box-shadow: 0 20px 48px color-mix(in srgb, var(--color-text-primary) 13%, transparent); backdrop-filter: blur(24px) saturate(135%); animation: echoEnter .42s cubic-bezier(.16,1,.3,1); }
   .knowledge-echo::before { position: absolute; top: -92px; right: -72px; z-index: -1; width: 210px; height: 210px; border: 1px solid color-mix(in srgb, var(--color-primary) 13%, transparent); border-radius: 50%; content: ''; box-shadow: 0 0 0 32px color-mix(in srgb, var(--color-primary) 4%, transparent), 0 0 0 66px color-mix(in srgb, var(--color-important) 3%, transparent); pointer-events: none; }
   .knowledge-echo__toggle { display: flex; align-items: center; width: 100%; gap: 10px; padding: 13px 14px; border: 0; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; }
   .knowledge-echo__symbol { display: grid; place-items: center; width: 31px; height: 31px; flex: none; border: 1px solid color-mix(in srgb, var(--color-primary) 26%, var(--color-border)); border-radius: 50%; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 75%, var(--color-bg)); font-size: 19px; box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--color-bg) 60%, transparent); }
-  .knowledge-echo__toggle > span:nth-child(2) { display: grid; gap: 1px; }
-  .knowledge-echo__toggle small { color: var(--color-text-gray); font-size: 7px; font-weight: 800; letter-spacing: .16em; }
   .knowledge-echo__toggle strong { font-size: 11px; font-weight: 720; letter-spacing: .01em; }
   .knowledge-echo__toggle > i { margin-left: auto; color: var(--color-text-gray); font: 17px/1 var(--font-family-body); font-style: normal; }
-  .knowledge-echo--collapsed { width: auto; max-width: min(260px, calc(100vw - 40px)); border-radius: 15px; box-shadow: 0 12px 30px color-mix(in srgb, var(--color-text-primary) 12%, transparent); }
-  .knowledge-echo--collapsed .knowledge-echo__toggle { min-width: 190px; padding: 9px 11px; }
-  .knowledge-echo--collapsed .knowledge-echo__symbol { width: 28px; height: 28px; font-size: 16px; }
-  .knowledge-echo--compact.knowledge-echo--collapsed { animation: echoPillIn .38s cubic-bezier(.16,1,.3,1), echoBreathe 2.2s ease .55s 1; }
   .knowledge-echo__body { max-height: calc(100vh - 180px); padding: 2px 18px 16px; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent); }
-  .knowledge-echo__meta { display: flex; align-items: center; justify-content: space-between; min-height: 38px; gap: 10px; color: var(--color-primary); font-size: 8px; font-weight: 780; letter-spacing: .1em; text-transform: uppercase; }
-  .knowledge-echo__meta button { display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--color-primary) 15%, var(--color-border)); border-radius: 999px; color: var(--color-text-gray); background: color-mix(in srgb, var(--color-bg) 60%, transparent); cursor: pointer; font: 8px var(--font-family-body); }
+  .knowledge-echo__meta { display: flex; align-items: center; justify-content: space-between; min-height: 44px; gap: 10px; color: var(--color-primary); font-size: 11px; font-weight: 650; }
+  .knowledge-echo__meta button { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 9px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text-secondary); background: var(--color-bg); cursor: pointer; font: 11px var(--font-family-body); }
   .knowledge-echo__meta button:hover { border-color: var(--color-primary); color: var(--color-primary); }
   .knowledge-echo__meta i { font-style: normal; font-size: 11px; }
   .knowledge-echo__document { display: block; width: 100%; padding: 0; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
   .knowledge-echo__document strong { display: -webkit-box; overflow: hidden; font-size: 18px; font-weight: 675; letter-spacing: -.035em; line-height: 1.16; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-  .knowledge-echo__document small { display: block; margin-top: 4px; color: var(--color-text-gray); font-size: 9px; }
-  .knowledge-echo__document blockquote { position: relative; margin: 14px 0 12px; padding: 0 0 0 15px; border: 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.65; }
+  .knowledge-echo__document small { display: block; margin-top: 6px; color: var(--color-text-gray); font-size: 11px; }
+  .knowledge-echo__document blockquote { position: relative; margin: 16px 0; padding: 0 0 0 14px; border: 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
   .knowledge-echo__document blockquote::before { position: absolute; top: 2px; bottom: 2px; left: 0; width: 2px; border-radius: 99px; background: linear-gradient(var(--color-primary), color-mix(in srgb, var(--color-important) 70%, var(--color-primary))); content: ''; }
   .knowledge-echo__terms { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 13px; }
-  .knowledge-echo__terms span { max-width: 140px; padding: 3px 7px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 16%, var(--color-border)); border-radius: 999px; color: var(--color-primary); background: color-mix(in srgb, var(--color-bg) 62%, transparent); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+  .knowledge-echo__terms span { max-width: 180px; padding: 4px 8px; overflow: hidden; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-primary); background: var(--color-bg); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .knowledge-echo__open { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--color-primary) 42%, var(--color-border)); border-radius: 10px; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary-alpha-10) 74%, var(--color-bg)); cursor: pointer; font: 700 10px var(--font-family-body); transition: transform .18s ease, background .18s ease, box-shadow .18s ease; }
   .knowledge-echo__open:hover { background: var(--color-primary-alpha-10); box-shadow: 0 9px 20px color-mix(in srgb, var(--color-primary) 11%, transparent); transform: translateY(-1px); }
   .knowledge-echo__open span { font-size: 13px; }
-  .knowledge-echo__feedback { display: flex; align-items: center; gap: 3px; margin-top: 8px; }
-  .knowledge-echo__feedback button { padding: 5px 6px; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 8px var(--font-family-body); }
+  .knowledge-echo__feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-top: 8px; }
+  .knowledge-echo__feedback button { min-height: 32px; padding: 6px; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; cursor: pointer; font: 11px var(--font-family-body); }
   .knowledge-echo__feedback button:hover { color: var(--color-primary); background: var(--color-primary-alpha-10); }
   .knowledge-echo__feedback button:last-child { margin-left: auto; }
-  .knowledge-echo__privacy { display: flex; align-items: center; gap: 5px; margin: 8px 1px 0; color: var(--color-text-gray); font-size: 7px; }
+  .knowledge-echo__notice { margin: 8px 0; color: var(--color-primary); font-size: 12px; line-height: 1.6; }
+  .knowledge-echo__privacy { display: flex; align-items: center; gap: 5px; margin: 12px 1px 0; color: var(--color-text-gray); font-size: 10px; }
   .knowledge-echo__privacy span { color: var(--color-success); font-size: 5px; box-shadow: 0 0 7px color-mix(in srgb, var(--color-success) 60%, transparent); }
   .knowledge-echo__loading { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 18px; border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent); }
   .knowledge-echo__loading span { height: 42px; border-radius: 9px; background: linear-gradient(100deg, var(--color-primary-alpha-10) 20%, color-mix(in srgb, var(--color-bg) 80%, transparent) 40%, var(--color-primary-alpha-10) 60%); background-size: 220% 100%; animation: echoShimmer 1.4s linear infinite; }
   .knowledge-echo__loading p { grid-column: 1 / -1; margin: 5px 0 0; color: var(--color-text-gray); font-size: 9px; text-align: center; }
   .echo-reset-button span { display: grid; place-items: center; min-width: 20px; height: 20px; border-radius: 99px; color: var(--color-primary); background: var(--color-primary-alpha-10); font-size: 9px; }
   @keyframes echoEnter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-  @keyframes echoPillIn { from { opacity: 0; transform: translateY(7px) scale(.94); } to { opacity: 1; transform: translateY(0) scale(1); } }
-  @keyframes echoBreathe { 0%, 100% { box-shadow: 0 12px 30px color-mix(in srgb, var(--color-text-primary) 12%, transparent); } 45% { box-shadow: 0 12px 34px color-mix(in srgb, var(--color-primary) 27%, transparent), 0 0 0 5px color-mix(in srgb, var(--color-primary) 7%, transparent); } }
   @keyframes echoShimmer { to { background-position: -220% 0; } }
   @container reading-area (min-width: 1100px) {
-    .reading-context { max-width: 1160px; }
+    .reading-context--with-echo { max-width: 1160px; }
     .reading-shell--with-echo { display: grid; grid-template-columns: minmax(0, 820px) 278px; align-items: start; width: min(1160px, calc(100% - 48px)); gap: 28px; margin: 0 auto; }
     .reading-shell--with-echo > .md-reader__markdown-content { min-width: 0; max-width: 820px; margin: 0; padding-right: 36px; padding-left: 36px; }
-    .reading-shell--with-echo .knowledge-echo { position: sticky; top: 24px; right: auto; bottom: auto; z-index: 4; width: 278px; max-height: none; margin: 24px 0 70px; }
-    .reading-shell--with-echo .knowledge-echo__body { max-height: none; overflow: visible; }
-    .reading-shell--with-echo .knowledge-echo--collapsed { width: 210px; margin-left: auto; }
+    .reading-shell--with-echo .knowledge-echo { position: sticky; top: 76px; right: auto; bottom: auto; z-index: 4; width: 278px; max-height: calc(100vh - 100px); margin: 24px 0 70px; }
+    .reading-shell--with-echo .knowledge-echo__body { max-height: calc(100vh - 164px); overflow-y: auto; }
   }
   .reading-progress { position: fixed; top: 0; left: var(--side-width, 0); z-index: 110; width: var(--progress); height: 2px; background: var(--color-primary); box-shadow: 0 0 12px color-mix(in srgb, var(--color-primary) 65%, transparent); transition: width .18s linear; }
   .app-toast { position: fixed; bottom: 28px; left: 50%; z-index: 140; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--color-primary) 28%, var(--color-border)); border-radius: 11px; color: var(--color-text-primary); background: color-mix(in srgb, var(--color-side-bg) 95%, transparent); box-shadow: 0 14px 32px color-mix(in srgb, var(--color-text-primary) 18%, transparent); font-size: 12px; transform: translateX(-50%); animation: toastIn .25s cubic-bezier(.2,.8,.2,1); backdrop-filter: blur(18px); }
@@ -2458,7 +2648,7 @@
   .pin-button:focus-visible, .file-item:focus-within .pin-button { opacity: 1; }
   .welcome__orb { filter: blur(80px); opacity: .22; }
   .welcome__mark { border-radius: 24px; transform: rotate(-5deg); }
-  .workspace-home { padding-top: clamp(48px, 8vh, 86px); }
+  .workspace-home { padding-top: 32px; }
   .workspace-grid { width: min(920px, 100%); gap: 18px; }
   .workspace-card { border-color: color-mix(in srgb, var(--color-border) 65%, transparent); box-shadow: 0 4px 18px color-mix(in srgb, var(--color-text-primary) 3%, transparent); border-radius: 20px; animation: surfaceArrive .45s var(--motion-ease) both; }
   .workspace-card:nth-child(2) { animation-delay: 45ms; }
@@ -2486,8 +2676,18 @@
   .command-palette { animation: none; border-radius: 22px; }
   .command-palette__input { padding: 19px; }
   .command-result { padding: 13px; }
-  .command-result__body strong { font-size: 13px; }
-  .command-result__body small { font: 12px/1.5 var(--font-family-body); }
+  .echo-peek { position: fixed; inset: 0; display: flex; flex-direction: column; width: min(500px, calc(100vw - 32px)); max-height: min(720px, calc(100dvh - 48px)); margin: auto; padding: 0; border: 0; border-radius: 16px; color: var(--color-text-primary); background: var(--color-side-bg); box-shadow: 0 24px 70px color-mix(in srgb, var(--color-text-primary) 24%, transparent); overflow: hidden; animation: echoEnter .24s var(--motion-ease); }
+  .echo-peek::backdrop { background: color-mix(in srgb, var(--color-text-primary) 22%, transparent); backdrop-filter: blur(5px); }
+  .echo-peek__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 24px 18px; }
+  .echo-peek__heading h2 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+  .echo-peek__heading p { margin: 8px 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.7; }
+  .echo-peek__close { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 0; border-radius: 8px; color: var(--color-text-secondary); background: var(--color-primary-alpha-10); cursor: pointer; }
+  .echo-peek .knowledge-echo__body { min-height: 0; max-height: none; padding: 0 24px 20px; overflow-y: auto; }
+  .echo-peek .knowledge-echo__document strong { font-size: 24px; line-height: 1.35; }
+  .echo-peek .knowledge-echo__open { min-height: 42px; font-size: 13px; }
+  .echo-peek__footer { flex: none; padding: 12px 24px; border-top: 1px solid var(--color-border); }
+  .echo-peek__footer button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; min-height: 36px; padding: 4px 0; border: 0; color: var(--color-primary); background: transparent; font: 600 13px var(--font-family-body); cursor: pointer; }
+  .echo-peek__footer kbd { color: var(--color-text-gray); font: 11px var(--font-family-body); }
   @keyframes surfaceArrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   @container reading-area (max-width: 620px) {
     .workspace-grid { grid-template-columns: minmax(0, 1fr); }
@@ -2505,6 +2705,5 @@
     :global(*), :global(*::before), :global(*::after) { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   }
   @media (max-width: 760px) { .workspace-grid { grid-template-columns: 1fr; max-width: 520px; } .workspace-card--continue, .workspace-card--daily-echo { grid-column: span 1; } .daily-echo { grid-template-columns: 1fr; gap: 20px; } .daily-echo__actions { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; } .daily-echo__open { grid-column: 1 / -1; } .daily-echo__helpful { text-align: left; } .daily-echo__add-context { padding: 6px; white-space: nowrap; } .daily-echo__menu > div { right: 0; bottom: auto; top: 28px; } .reading-context { padding: 0 28px; } .knowledge-echo { right: 18px; bottom: 78px; } .knowledge-echo__feedback { flex-wrap: wrap; } .onboarding__steps { grid-template-columns: 1fr; } .onboarding__step + .onboarding__step { border-top: 1px solid var(--color-border); border-left: 0; } }
-  @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 60px 28px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } .knowledge-echo--compact:not(.knowledge-echo--collapsed) { right: 0; bottom: 0; z-index: 105; width: 100%; max-height: min(58vh, 520px); border-radius: 22px 22px 0 0; box-shadow: 0 -18px 55px color-mix(in srgb, var(--color-text-primary) 18%, transparent); animation: echoSheetIn .34s cubic-bezier(.16,1,.3,1); } .knowledge-echo--compact:not(.knowledge-echo--collapsed) .knowledge-echo__body { max-height: calc(min(58vh, 520px) - 58px); } .knowledge-echo--collapsed { right: 18px; bottom: 78px; } }
-  @keyframes echoSheetIn { from { opacity: 0; transform: translateY(34px); } to { opacity: 1; transform: translateY(0); } }
+  @media (max-width: 560px) { .welcome__actions { flex-direction: column; width: 100%; max-width: 300px; } .workspace-home { padding: 32px 24px; } .workspace-home .welcome__subtitle { max-width: 100%; } .floating-gear { right: 18px; bottom: 18px; } .echo-peek__heading { padding: 20px 20px 16px; } .echo-peek .knowledge-echo__body { padding-right: 20px; padding-left: 20px; } }
 </style>

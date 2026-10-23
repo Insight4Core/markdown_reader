@@ -217,7 +217,10 @@ fn markdown_files_for_roots(roots: &[String]) -> Vec<PathBuf> {
             if root.is_dir() {
                 markdown_files(&root)
             } else if root.is_file()
-                && matches!(root.extension().and_then(|ext| ext.to_str()), Some("md" | "markdown" | "mdx"))
+                && matches!(
+                    root.extension().and_then(|ext| ext.to_str()),
+                    Some("md" | "markdown" | "mdx")
+                )
             {
                 vec![root]
             } else {
@@ -265,16 +268,115 @@ fn analyse_markdown_file(path: &Path) -> Option<AnalysedDocument> {
     Some(document)
 }
 
+fn plain_text_line(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let mut text = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '<'
+            && chars
+                .get(index + 1)
+                .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, '/' | '!'))
+        {
+            if let Some(end) = chars[index..].iter().position(|c| *c == '>') {
+                index += end + 1;
+                continue;
+            }
+        }
+        if chars[index] == '[' {
+            if let Some(label_end) = chars[index + 1..].iter().position(|c| *c == ']') {
+                let close = index + 1 + label_end;
+                if chars.get(close + 1) == Some(&'(') {
+                    let mut depth = 1;
+                    let mut end = close + 2;
+                    while end < chars.len() && depth > 0 {
+                        if chars[end] == '(' {
+                            depth += 1;
+                        }
+                        if chars[end] == ')' {
+                            depth -= 1;
+                        }
+                        end += 1;
+                    }
+                    if depth == 0 {
+                        text.extend(&chars[index + 1..close]);
+                        index = end;
+                        continue;
+                    }
+                }
+            }
+        }
+        if chars[index] != '`' {
+            text.push(chars[index]);
+        }
+        index += 1;
+    }
+    text.replace("**", "")
+        .replace("__", "")
+        .replace("~~", "")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .trim()
+        .trim_start_matches(|c: char| matches!(c, '#' | '>' | '*' | '+'))
+        .trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn contextual_excerpt(text: &str, query: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_string();
+    }
+    let lowered = text.to_lowercase();
+    let offset = lowered
+        .find(&query.to_lowercase())
+        .map(|byte| {
+            let lowered_index = lowered[..byte].chars().count();
+            chars
+                .iter()
+                .enumerate()
+                .flat_map(|(index, c)| c.to_lowercase().map(move |_| index))
+                .nth(lowered_index)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+    let start = offset
+        .saturating_sub(limit / 3)
+        .min(chars.len().saturating_sub(limit));
+    let end = (start + limit).min(chars.len());
+    format!(
+        "{}{}{}",
+        if start > 0 { "…" } else { "" },
+        chars[start..end].iter().collect::<String>(),
+        if end < chars.len() { "…" } else { "" }
+    )
+}
+
 fn best_snippet(content: &str, matched_terms: &[String]) -> String {
     let mut best = (0usize, String::new());
+    let mut fenced = false;
     for line in content.lines() {
-        let cleaned = line
-            .trim()
-            .trim_start_matches(|character: char| {
-                matches!(character, '#' | '>' | '-' | '*' | '+' | '`')
-            })
-            .trim();
-        if cleaned.chars().count() < 12 || cleaned.starts_with("![") {
+        let raw = line.trim();
+        if raw.starts_with("```") || raw.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced
+            || raw.starts_with('#')
+            || raw.starts_with("![")
+            || raw.starts_with('|')
+            || raw.contains(['│', '├', '└', '─'])
+        {
+            continue;
+        }
+        let cleaned = plain_text_line(raw);
+        if cleaned.chars().count() < 24 {
             continue;
         }
         let lowered = cleaned.to_lowercase();
@@ -282,8 +384,9 @@ fn best_snippet(content: &str, matched_terms: &[String]) -> String {
             .iter()
             .filter(|term| lowered.contains(term.as_str()))
             .count();
-        if hits > best.0 {
-            best = (hits, cleaned.to_string());
+        let score = hits * 4 + 1;
+        if score > best.0 {
+            best = (score, cleaned);
         }
     }
     let source = if best.1.is_empty() {
@@ -296,11 +399,13 @@ fn best_snippet(content: &str, matched_terms: &[String]) -> String {
     } else {
         best.1
     };
-    let mut snippet: String = source.chars().take(180).collect();
-    if source.chars().count() > 180 {
-        snippet.push('…');
-    }
-    snippet
+    let plain = plain_text_line(&source);
+    let term = matched_terms
+        .iter()
+        .find(|term| plain.to_lowercase().contains(term.as_str()))
+        .map(String::as_str)
+        .unwrap_or("");
+    contextual_excerpt(&plain, term, 180)
 }
 
 fn rank_knowledge_echoes(
@@ -416,7 +521,10 @@ async fn find_knowledge_echoes(
 }
 
 #[tauri::command]
-async fn search_content(root_paths: Vec<String>, query: String) -> Result<Vec<SearchResult>, String> {
+async fn search_content(
+    root_paths: Vec<String>,
+    query: String,
+) -> Result<Vec<SearchResult>, String> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
@@ -434,18 +542,19 @@ async fn search_content(root_paths: Vec<String>, query: String) -> Result<Vec<Se
             let mut file_results = Vec::new();
 
             for (i, line) in content.lines().enumerate() {
-                if line.to_lowercase().contains(&query_lower) {
+                let plain = plain_text_line(line);
+                // The group already names the document; prefer its actual content over a duplicate H1.
+                if i == 0
+                    && line.trim_start().starts_with("# ")
+                    && file_path.file_stem()?.to_string_lossy().to_lowercase()
+                        == plain.to_lowercase()
+                {
+                    continue;
+                }
+                if plain.to_lowercase().contains(&query_lower) {
                     let file_name = file_path.file_name()?.to_string_lossy().to_string();
 
-                    // Simple snippet extraction
-                    let trimmed = line.trim();
-                    let snippet = if trimmed.chars().count() > 80 {
-                        let mut s = trimmed.chars().take(80).collect::<String>();
-                        s.push_str("...");
-                        s
-                    } else {
-                        trimmed.to_string()
-                    };
+                    let snippet = contextual_excerpt(&plain, &query, 160);
 
                     file_results.push(SearchResult {
                         file_path: file_path.to_string_lossy().to_string(),
@@ -460,11 +569,34 @@ async fn search_content(root_paths: Vec<String>, query: String) -> Result<Vec<Se
                     }
                 }
             }
+            if file_results.is_empty()
+                && file_path
+                    .file_name()?
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .contains(&query_lower)
+            {
+                file_results.push(SearchResult {
+                    file_path: file_path.to_string_lossy().to_string(),
+                    file_name: file_path.file_name()?.to_string_lossy().to_string(),
+                    line_number: 1,
+                    snippet: best_snippet(&content, std::slice::from_ref(&query_lower)),
+                });
+            }
             Some(file_results)
         })
         .flatten()
         .collect();
 
+    // Stable order keeps grouped results and keyboard selection predictable.
+    results.sort_by(|a, b| {
+        b.file_name
+            .to_lowercase()
+            .contains(&query_lower)
+            .cmp(&a.file_name.to_lowercase().contains(&query_lower))
+            .then_with(|| a.file_path.cmp(&b.file_path))
+            .then_with(|| a.line_number.cmp(&b.line_number))
+    });
     // Limit total results
     results.truncate(100);
 
@@ -531,6 +663,41 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excerpts_remove_markup_without_rendering_html() {
+        assert_eq!(plain_text_line("# <strong>Memory</strong> and [knowledge](https://example.com/a(b)) **return** with `context`"), "Memory and knowledge return with context");
+        assert_eq!(
+            plain_text_line("中文 <em>知识</em> &amp; memory_value"),
+            "中文 知识 & memory_value"
+        );
+    }
+
+    #[test]
+    fn excerpts_keep_late_unicode_matches_in_view() {
+        let line = format!(
+            "{}知识回响{}",
+            "很长的前言".repeat(50),
+            "后面的解释".repeat(50)
+        );
+        let excerpt = contextual_excerpt(&line, "知识回响", 160);
+        assert!(excerpt.contains("知识回响"));
+        assert!(excerpt.starts_with('…'));
+        assert!(excerpt.ends_with('…'));
+        assert!(excerpt.chars().count() <= 162);
+        assert!(
+            contextual_excerpt(&format!("{}İDEA context", "前言".repeat(80)), "İDEA", 80)
+                .contains("İDEA")
+        );
+    }
+
+    #[test]
+    fn echoes_prefer_readable_prose_over_code_and_directory_trees() {
+        let content = "# Memory\n```python\nmemory = memory_store(memory)\n```\n│ ├── memory.py memory memory\nA saved memory becomes useful when it returns alongside a related question.";
+        let excerpt = best_snippet(content, &["memory".to_string()]);
+        assert!(excerpt.starts_with("A saved memory"));
+        assert!(!excerpt.contains("memory.py"));
+    }
 
     fn analysed(path: &str, content: &str) -> AnalysedDocument {
         let path = PathBuf::from(path);
