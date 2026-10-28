@@ -718,9 +718,102 @@ mod macos_print {
     }
 }
 
+/// The macOS menu bar. Tauri's default menu binds ⌘W to "Close Window"; the menu sees key
+/// equivalents before the page does, so ⌘W would close the whole window instead of a tab.
+/// This keeps the default menu's items and gives ⌘T/⌘W to tabs.
+#[cfg(target_os = "macos")]
+fn macos_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID};
+
+    let package = app.package_info();
+    let about = AboutMetadata {
+        name: Some(package.name.clone()),
+        version: Some(package.version.to_string()),
+        ..Default::default()
+    };
+    let app_menu = Submenu::with_items(
+        app,
+        package.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+    let file_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(app, MENU_NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
+            &MenuItem::with_id(app, MENU_CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, MENU_CLOSE_WINDOW, "Close Window", true, Some("CmdOrCtrl+Shift+W"))?,
+        ],
+    )?;
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let view_menu = Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+    let window_menu = Submenu::with_id_and_items(
+        app,
+        WINDOW_SUBMENU_ID,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+        ],
+    )?;
+    Menu::with_items(app, &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MENU_NEW_TAB: &str = "new-tab";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MENU_CLOSE_TAB: &str = "close-tab";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MENU_CLOSE_WINDOW: &str = "close-window";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(macos_menu).on_menu_event(|app, event| {
+        use tauri::{Emitter, Manager};
+        match event.id().as_ref() {
+            MENU_NEW_TAB => {
+                let _ = app.emit("menu://new-tab", ());
+            }
+            MENU_CLOSE_TAB => {
+                let _ = app.emit("menu://close-tab", ());
+            }
+            MENU_CLOSE_WINDOW => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+            }
+            _ => {}
+        }
+    });
+    builder
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
             if args.len() > 1 {

@@ -8,6 +8,7 @@
   import { resolveLocale } from '$lib/locale';
   import { articleHtmlForClipboard } from '$lib/export-document';
   import { renderMermaidDiagrams } from '$lib/mermaid-diagrams';
+  import { createTab, tabPath, findTabShowing, insertAfter, closeTab, cycleTab, tabByNumber, trimHistory, restoreTabs, type ReaderTab } from '$lib/tabs';
   import { writeHtml, writeText as writeClipboardText } from '@tauri-apps/plugin-clipboard-manager';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
@@ -29,6 +30,7 @@
     motionPreference.addEventListener('change', updateMotionPreference);
     let unlistenPromise: ReturnType<typeof listen> | null = null;
     let unlistenDrop: (() => void) | null = null;
+    const menuUnlisteners: ReturnType<typeof listen>[] = [];
     let echoResizeObserver: ResizeObserver | null = null;
     const dayRefreshTimer = window.setInterval(() => currentDayKey = localDayKey(), 60000);
     // Notes written by other apps (often AI tools) should show up without a manual refresh.
@@ -45,9 +47,15 @@
             cleanPath = decodeURIComponent(cleanPath.slice(7));
           }
           console.log("Received file from OS:", cleanPath);
-          openSpecificFile(cleanPath, { standalone: !isWorkspaceFile(cleanPath) });
+          // Keep the note being read; a file opened from Finder/Explorer gets its own tab.
+          if (filePath) void openInNewTab(cleanPath, { standalone: !isWorkspaceFile(cleanPath) });
+          else void openSpecificFile(cleanPath, { standalone: !isWorkspaceFile(cleanPath) });
         }
       });
+      menuUnlisteners.push(
+        listen('menu://new-tab', () => void openHomeTab()),
+        listen('menu://close-tab', () => void closeTabById())
+      );
       getCurrentWindow().onDragDropEvent((event) => {
         if (event.payload.type === 'over') {
           isFileDragOver = true;
@@ -62,6 +70,8 @@
     window.addEventListener('scroll', saveReadingProgress, { passive: true });
     // Capture before SvelteKit's delegated router interprets note links as app routes.
     document.addEventListener('click', handleMarkdownClick, true);
+    // Middle-click on a note link opens it in a new tab.
+    document.addEventListener('auxclick', handleMarkdownClick, true);
     const handleGlobalShortcut = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const editing = target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
@@ -74,6 +84,23 @@
           event.preventDefault();
           toggleSidebar();
         }
+      }
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !globalSearchOpen && !newWorkspaceOpen) {
+        const key = event.key.toLowerCase();
+        // On macOS ⌘T/⌘W come from the File menu (the menu sees them before the page does).
+        if (!isMac && !event.shiftKey && key === 't') { event.preventDefault(); void openHomeTab(); }
+        else if (!isMac && !event.shiftKey && key === 'w') { event.preventDefault(); void closeTabById(); }
+        else if (/^[1-9]$/.test(event.key) && tabs.length > 1) {
+          const id = tabByNumber(displayTabs, Number(event.key));
+          if (id) { event.preventDefault(); void activateTab(id); }
+        } else if (isMac && event.metaKey && event.shiftKey && ['BracketRight', 'BracketLeft'].includes(event.code) && tabs.length > 1) {
+          event.preventDefault();
+          void activateTab(cycleTab({ tabs: displayTabs, activeId: activeTabId }, event.code === 'BracketRight' ? 1 : -1));
+        }
+      }
+      if (event.ctrlKey && event.key === 'Tab' && tabs.length > 1) {
+        event.preventDefault();
+        void activateTab(cycleTab({ tabs: displayTabs, activeId: activeTabId }, event.shiftKey ? -1 : 1));
       }
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p' && filePath) {
         // Print the note, not the app window.
@@ -117,6 +144,8 @@
       echoResizeObserver?.disconnect();
       unlistenPromise?.then(unlisten => unlisten());
       unlistenDrop?.();
+      menuUnlisteners.forEach(unlisten => unlisten.then(stop => stop()));
+      document.removeEventListener('auxclick', handleMarkdownClick, true);
     };
   });
 
@@ -125,6 +154,15 @@
   type ReadingVisit = { path: string; position: number; fromEcho: boolean };
   let readingHistory = $state<ReadingVisit[]>([{ path: '', position: 0, fromEcho: false }]);
   let readingHistoryIndex = $state(0);
+  // Tabs. The active tab's history lives in readingHistory/readingHistoryIndex above;
+  // `tabs` holds a snapshot of every tab and is refreshed whenever the reader switches.
+  let tabs = $state<ReaderTab[]>([]);
+  let activeTabId = $state('');
+  let tabsByWorkspace = $state<Record<string, { tabs: ReaderTab[]; activeId: string }>>({});
+  let tabsDiscovered = $state(false);
+  let tabSequence = 0;
+  let displayTabs = $derived(tabs.map(tab => tab.id === activeTabId ? { ...tab, history: readingHistory, index: readingHistoryIndex } : tab));
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
   let navigating = $state(false);
   let navigationRequest = 0;
   
@@ -420,6 +458,8 @@
     await store.set('recentFiles', recentFiles);
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
+    await store.set('tabsByWorkspace', tabsForStore());
+    await store.set('tabsDiscovered', tabsDiscovered);
     await store.set('lastSeenAt', lastSeenAt);
     await store.set('rediscoveryPreferences', rediscoveryPreferences);
     await store.set('dailyEchoFinishedDay', dailyEchoFinishedDay);
@@ -527,12 +567,24 @@
         const savedFeedbackNudgeDismissed = await store.get('feedbackNudgeDismissed');
         if (typeof savedFeedbackNudgeDismissed === 'boolean') feedbackNudgeDismissed = savedFeedbackNudgeDismissed;
 
-        const savedFilePath = await store.get<{value?: string} | string>('filePath');
-        if (savedFilePath) {
-          let fp = typeof savedFilePath === 'string' ? savedFilePath : savedFilePath.value;
-          if (fp) {
-             await openSpecificFile(fp, { standalone: fp === standaloneFilePath || !isWorkspaceFile(fp) });
+        const savedTabsDiscovered = await store.get('tabsDiscovered');
+        if (typeof savedTabsDiscovered === 'boolean') tabsDiscovered = savedTabsDiscovered;
+        const savedTabs = await store.get('tabsByWorkspace');
+        if (savedTabs && typeof savedTabs === 'object') tabsByWorkspace = savedTabs as typeof tabsByWorkspace;
+        const restoredTabs = restoreTabs(tabsByWorkspace[folderPath || '']);
+        if (restoredTabs) {
+          tabs = restoredTabs.tabs;
+          await showTab(restoredTabs.tabs.find(tab => tab.id === restoredTabs.activeId)!);
+        } else {
+          // First run with tabs: reopen the note from the previous version, in a single tab.
+          const savedFilePath = await store.get<{value?: string} | string>('filePath');
+          if (savedFilePath) {
+            let fp = typeof savedFilePath === 'string' ? savedFilePath : savedFilePath.value;
+            if (fp) {
+               await openSpecificFile(fp, { standalone: fp === standaloneFilePath || !isWorkspaceFile(fp) });
+            }
           }
+          ensureTabs();
         }
         console.log("[Store] Loaded data:", await store.entries());
       } catch (e) {
@@ -768,11 +820,13 @@
   }
 
   async function activateWorkspaceFolder(path: string) {
+    tabsForStore();
     resetWorkspaceReadingState();
     recentChanges = [];
     folderPath = path;
     folderFiles = await scanWorkspaceSources();
     sidebarTab = 'files';
+    await restoreWorkspaceTabs();
     void syncStore();
   }
 
@@ -1002,6 +1056,136 @@
     }
   }
 
+  function nextTabId() {
+    return `tab-${Date.now().toString(36)}-${++tabSequence}`;
+  }
+
+  function ensureTabs() {
+    if (tabs.some(tab => tab.id === activeTabId)) return;
+    const id = nextTabId();
+    tabs = [{ id, history: $state.snapshot(readingHistory) as ReaderTab['history'], index: readingHistoryIndex }];
+    activeTabId = id;
+  }
+
+  function startFreshTabs() {
+    const tab = createTab(nextTabId());
+    tabs = [tab];
+    activeTabId = tab.id;
+  }
+
+  /** Copy the live history, with the current scroll position, into the active tab. */
+  function snapshotActiveTab() {
+    ensureTabs();
+    rememberCurrentVisit();
+    const history = $state.snapshot(readingHistory) as ReaderTab['history'];
+    tabs = tabs.map(tab => tab.id === activeTabId ? { ...tab, history, index: readingHistoryIndex } : tab);
+  }
+
+  async function showTab(tab: ReaderTab, options: OpenFileOptions = {}) {
+    activeTabId = tab.id;
+    readingHistory = tab.history.map(visit => ({ ...visit }));
+    readingHistoryIndex = tab.index;
+    const visit = tab.history[tab.index];
+    if (visit?.path) {
+      const jumps = Boolean(options.search) || options.anchor !== undefined;
+      await openSpecificFile(visit.path, { ...options, history: true, position: jumps ? undefined : visit.position });
+    } else {
+      openWorkspaceHome(true);
+      await tick();
+      window.scrollTo({ top: visit?.position || 0, behavior: 'instant' });
+    }
+    void syncStore();
+  }
+
+  async function activateTab(id: string, options: OpenFileOptions = {}) {
+    if (navigating || !tabs.some(tab => tab.id === id)) return;
+    if (id === activeTabId) {
+      if (filePath && (options.search || options.anchor !== undefined)) await openSpecificFile(filePath, { ...options, history: true });
+      return;
+    }
+    snapshotActiveTab();
+    await showTab(tabs.find(tab => tab.id === id)!, options);
+  }
+
+  async function openInNewTab(path: string, options: OpenFileOptions = {}) {
+    if (!path || navigating) return;
+    ensureTabs();
+    const existing = findTabShowing(displayTabs, path);
+    if (existing) return activateTab(existing.id, options);
+    snapshotActiveTab();
+    const tab = createTab(nextTabId(), path, readingProgress[path]?.position ?? 0);
+    tabs = insertAfter(tabs, activeTabId, tab);
+    await showTab(tab, options);
+  }
+
+  async function openHomeTab() {
+    if (navigating) return;
+    snapshotActiveTab();
+    const tab = createTab(nextTabId());
+    tabs = insertAfter(tabs, activeTabId, tab);
+    await showTab(tab);
+  }
+
+  async function closeTabById(id = activeTabId) {
+    if (navigating) return;
+    ensureTabs();
+    if (tabs.length <= 1) {
+      // The last tab stays and goes back to the knowledge home.
+      if (filePath) openWorkspaceHome();
+      return;
+    }
+    if (id !== activeTabId) {
+      tabs = closeTab({ tabs, activeId: activeTabId }, id).tabs;
+      void syncStore();
+      return;
+    }
+    saveReadingProgress();
+    const next = closeTab({ tabs, activeId: activeTabId }, id);
+    tabs = next.tabs;
+    await showTab(next.tabs.find(tab => tab.id === next.activeId)!);
+  }
+
+  async function restoreWorkspaceTabs() {
+    const saved = restoreTabs(tabsByWorkspace[folderPath || '']);
+    if (!saved) { startFreshTabs(); return; }
+    tabs = saved.tabs;
+    await showTab(saved.tabs.find(tab => tab.id === saved.activeId)!);
+  }
+
+  /** Tabs of every knowledge base, with the current one refreshed, ready for the settings file. */
+  function tabsForStore() {
+    if (tabs.length === 0) return $state.snapshot(tabsByWorkspace);
+    const current = displayTabs.map(tab => {
+      const copy = $state.snapshot(tab) as ReaderTab;
+      if (tab.id === activeTabId && filePath && !navigating) {
+        copy.history[copy.index] = { ...copy.history[copy.index], position: Math.round(window.scrollY) };
+      }
+      return trimHistory(copy);
+    });
+    tabsByWorkspace = { ...tabsByWorkspace, [folderPath || '']: { tabs: current, activeId: activeTabId } };
+    return $state.snapshot(tabsByWorkspace);
+  }
+
+  function opensInNewTab(event: MouseEvent | KeyboardEvent) {
+    return event.metaKey || event.ctrlKey || ('button' in event && event.button === 1);
+  }
+
+  /** Click opens in the current tab; ⌘/Ctrl-click or middle-click opens a new tab. */
+  function openFromClick(event: MouseEvent, path: string, options: OpenFileOptions = {}) {
+    if (event.type === 'auxclick' && event.button !== 1) return;
+    if (opensInNewTab(event)) {
+      event.preventDefault();
+      tabsDiscovered = true;
+      void openInNewTab(path, options);
+    } else void openSpecificFile(path, options);
+  }
+
+  function tabTitle(tab: ReaderTab) {
+    const path = tabPath(tab);
+    if (!path) return folderPath ? workspaceName : t('misc.reader_title');
+    return (path.split(/[/\\]/).pop() || path).replace(/\.(md|markdown|mdx)$/i, '');
+  }
+
   function showToast(message: string) {
     toastMessage = message;
     if (toastTimer) clearTimeout(toastTimer);
@@ -1057,6 +1241,11 @@
 
   async function openSpecificFile(path: string, options: OpenFileOptions = {}) {
     if (!path) return false;
+    if (!options.history && tabs.length > 1) {
+      // Already open in another tab: go there instead of opening it twice.
+      const other = findTabShowing(displayTabs, path, activeTabId);
+      if (other) { await activateTab(other.id, options); return true; }
+    }
     const standalone = options.standalone ?? !isWorkspaceFile(path);
     if (!options.history) rememberCurrentVisit();
     const request = ++navigationRequest;
@@ -1225,14 +1414,15 @@
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeEchoPeek();
   }
 
-  async function openKnowledgeEcho(echo: KnowledgeEcho) {
+  async function openKnowledgeEcho(echo: KnowledgeEcho, newTab = false) {
     // Dismiss the temporary layer before navigating, without restoring its old scroll.
     if (compactEchoMode) knowledgeEchoExpanded = false;
     await updateEchoPreference(echo.file_path, {
       openedCount: (echoPreferences[echoPreferenceKey(filePath, echo.file_path)]?.openedCount || 0) + 1,
       lastOpenedAt: Date.now()
     });
-    await openSpecificFile(echo.file_path, { fromEcho: true });
+    if (newTab) { tabsDiscovered = true; await openInNewTab(echo.file_path, { fromEcho: true }); }
+    else await openSpecificFile(echo.file_path, { fromEcho: true });
   }
 
   function markEchoHelpful(echo: KnowledgeEcho) {
@@ -1310,8 +1500,10 @@
     progressSaveTimer = setTimeout(() => syncStore(), 700);
   }
 
-  function openSearchResult(result: SearchResult, term = searchQuery) {
-    void openSpecificFile(result.file_path, { search: { term: term.trim(), line: result.line_number } });
+  function openSearchResult(result: SearchResult, term = searchQuery, newTab = false) {
+    const options = { search: { term: term.trim(), line: result.line_number } };
+    if (newTab) { tabsDiscovered = true; void openInNewTab(result.file_path, options); }
+    else void openSpecificFile(result.file_path, options);
   }
 
   function openGlobalSearch() {
@@ -1386,7 +1578,8 @@
       void tick().then(() => document.getElementById(`search-result-${selectedSearchIndex}`)?.scrollIntoView({ block: 'nearest' }));
     } else if (event.key === 'Enter' && globalSearchResults[selectedSearchIndex]) {
       event.preventDefault();
-      openSearchResult(globalSearchResults[selectedSearchIndex], globalSearchQuery);
+      // ⌘/Ctrl+Enter opens the result in a new tab.
+      openSearchResult(globalSearchResults[selectedSearchIndex], globalSearchQuery, event.metaKey || event.ctrlKey);
       closeGlobalSearch();
     }
   }
@@ -1691,8 +1884,10 @@
   }
 
   function closeWorkspace() {
+    tabsForStore();
     saveReadingProgress();
     resetReadingHistory();
+    startFreshTabs();
     readingError = null;
     if (unwatch) {
       unwatch();
@@ -1764,6 +1959,8 @@
   async function handleMarkdownClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest('.md-reader__markdown-content')) return;
+    // auxclick only matters for the middle button (open a note link in a new tab).
+    if (e.type === 'auxclick' && (e.button !== 1 || !target.closest('a'))) return;
     
     // 1. Handle Code Copy
     const copyBtn = target.closest('.md-reader__btn--copy');
@@ -1799,6 +1996,9 @@
           const resolved = await resolve(await dirname(filePath), link.path);
           if (normalizedPath(resolved) === normalizedPath(filePath) && link.fragment !== undefined) {
             if (!scrollToFragment(link.fragment)) showToast(t('reading.anchor_missing'));
+          } else if (opensInNewTab(e)) {
+            tabsDiscovered = true;
+            await openInNewTab(resolved, { anchor: link.fragment });
           } else await openSpecificFile(resolved, { anchor: link.fragment });
         } else showToast(t('reading.link_unsupported'));
       } catch (error) {
@@ -1860,7 +2060,7 @@
           <button onclick={showNextEcho} aria-label={t('echo.next')}>{knowledgeEchoIndex + 1} / {knowledgeEchoes.length}<i aria-hidden="true">→</i></button>
         {/if}
       </div>
-      <button class="knowledge-echo__document" onclick={() => openKnowledgeEcho(echo)}>
+      <button class="knowledge-echo__document" onclick={(event) => openKnowledgeEcho(echo, opensInNewTab(event))}>
         <strong>{echo.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
         <small>{echoContext(echo)}</small>
         <blockquote>{echo.snippet || t('echo.no_preview')}</blockquote>
@@ -1870,7 +2070,7 @@
           {#each echo.matched_terms.slice(0, 3) as term}<span>{term}</span>{/each}
         </div>
       {/if}
-      <button class="knowledge-echo__open" onclick={() => openKnowledgeEcho(echo)}>{t('echo.open')}<span aria-hidden="true">↗</span></button>
+      <button class="knowledge-echo__open" onclick={(event) => openKnowledgeEcho(echo, opensInNewTab(event))}>{t('echo.open')}<span aria-hidden="true">↗</span></button>
       <div class="knowledge-echo__feedback">
         <button onclick={() => markEchoHelpful(echo)}>♡ {t('echo.helpful')}</button>
         <button onclick={() => snoozeKnowledgeEcho(echo)}>{t('echo.later')}</button>
@@ -1928,7 +2128,7 @@
                  <li class="search-group">
                    <div class="search-group__heading"><strong>{group.file_name}</strong><small title={group.file_path}>{documentContext(group.file_path, sourcePaths)}</small></div>
                    {#each group.matches as res}
-                     <button class="search-item {filePath === res.file_path ? 'active-file' : ''}" aria-label={`${group.file_name} · L${res.line_number} · ${res.snippet}`} data-sidebar-control onkeydown={handleSidebarKeys} onclick={() => openSearchResult(res)}>
+                     <button class="search-item {filePath === res.file_path ? 'active-file' : ''}" aria-label={`${group.file_name} · L${res.line_number} · ${res.snippet}`} data-sidebar-control onkeydown={handleSidebarKeys} onclick={(event) => openSearchResult(res, searchQuery, opensInNewTab(event))}>
                        <span class="search-item__line">L{res.line_number}</span><span class="search-item__snippet">{@render searchExcerpt(res.snippet, searchQuery)}</span>
                      </button>
                    {/each}
@@ -1948,7 +2148,7 @@
                     </button></li>
                   {:else}
                     <li class:file-item--source={f.isSource} class="file-item {filePath === f.path ? 'active-file' : ''}">
-                      <button class="file-open" data-sidebar-control aria-current={filePath === f.path ? 'page' : undefined} onkeydown={handleSidebarKeys} style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={() => openSpecificFile(f.path)}>
+                      <button class="file-open" data-sidebar-control aria-current={filePath === f.path ? 'page' : undefined} onkeydown={handleSidebarKeys} style="padding-left: {26 + (f.depth - 1) * 12}px" onclick={(event) => openFromClick(event, f.path)} onauxclick={(event) => openFromClick(event, f.path)}>
                       <span class="file-icon file-icon--document" aria-hidden="true"></span>
                       <span class="file-name" title={f.name}>{f.isSource ? '↗ ' + t('workspace.linked_note') + ' · ' : ''}{f.name}</span>
                       </button>
@@ -1982,9 +2182,22 @@
   </div>
   {/if}
 
-  <div class="md-reader__body" style={!folderPath && !filePath ? 'padding-left: 0' : undefined}>
+  <div class="md-reader__body" style={!folderPath && !filePath ? 'padding-left: 0' : undefined} style:--reader-chrome-height={displayTabs.length > 1 ? '110px' : '72px'}>
     {#if folderPath || filePath}
-    <nav class="reading-toolbar" aria-label={t('navigation.label')}>
+    {#if displayTabs.length > 1}
+      <div class="tab-strip" role="tablist" aria-label={t('tabs.label')}>
+        {#each displayTabs as tab (tab.id)}
+          <div class="tab-strip__tab" class:tab-strip__tab--active={tab.id === activeTabId}>
+            <button role="tab" aria-selected={tab.id === activeTabId} title={tabPath(tab) || tabTitle(tab)} onclick={() => activateTab(tab.id)} onauxclick={(event) => { if (event.button === 1) { event.preventDefault(); void closeTabById(tab.id); } }}>
+              <span>{tabTitle(tab)}</span>
+            </button>
+            <button class="tab-strip__close" aria-label={`${t('tabs.close')} · ${tabTitle(tab)}`} title={t('tabs.close') + (isMac ? ' · ⌘W' : ' · Ctrl W')} onclick={() => closeTabById(tab.id)}>×</button>
+          </div>
+        {/each}
+        <button class="tab-strip__new" aria-label={t('tabs.new')} title={t('tabs.new') + (isMac ? ' · ⌘T' : ' · Ctrl T')} onclick={openHomeTab}>＋</button>
+      </div>
+    {/if}
+    <nav class="reading-toolbar" class:reading-toolbar--under-tabs={displayTabs.length > 1} aria-label={t('navigation.label')}>
       <button class="reading-toolbar__sidebar" aria-label={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} title={showSidebar ? t('navigation.hide_sidebar') : t('navigation.show_sidebar')} aria-pressed={showSidebar} onclick={toggleSidebar}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16M5.5 8h1M5.5 11h1"/></svg>
       </button>
@@ -2032,7 +2245,7 @@
           <h2>{workspaceName}</h2>
           <p class="welcome__subtitle" title={folderPath}>{markdownFiles.length} {t('workspace.documents')} · {folderPath}</p>
           {#if resumeDocument}
-            <button class="workspace-resume" onclick={() => openSpecificFile(resumeDocument.path)}>
+            <button class="workspace-resume" onclick={(event) => openFromClick(event, resumeDocument.path)} onauxclick={(event) => openFromClick(event, resumeDocument.path)}>
               <span class="workspace-resume__body"><span class="workspace-resume__action">{t('workspace.resume')}</span><strong>{resumeDocument.name.replace(/\.(md|markdown|mdx)$/i, '')}</strong><small>{t('workspace.last_read')}{formatLastRead(resumeDocument.path)} · {progressPercent(resumeDocument.path)}%</small></span>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
             </button>
@@ -2066,7 +2279,7 @@
               </div>
               <div class="document-list changes-list">
                 {#each recentChangeItems as change (change.file_path)}
-                  <button class="changes-list__item changes-list__item--{change.status}" onclick={() => openSpecificFile(change.file_path)}>
+                  <button class="changes-list__item changes-list__item--{change.status}" onclick={(event) => openFromClick(event, change.file_path)} onauxclick={(event) => openFromClick(event, change.file_path)}>
                     <span class="changes-list__status">{t(`changes.${change.status}`)}</span>
                     <span class="changes-list__name">{change.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</span>
                     <small>{documentLocation(change.file_path, sourcePaths)} · {formatRelativeTime(change.modified_at)}</small>
@@ -2087,7 +2300,7 @@
                 <article class="daily-echo">
                   <div class="daily-echo__content">
                     <p class="daily-echo__reason">{#if dailyEchoSelections[folderPath]?.read}✓ {t('daily_echo.read')}{:else}{rediscoveryReason(dailyEcho)}{/if}</p>
-                    <button class="daily-echo__document" onclick={() => openSpecificFile(dailyEcho.path)}>
+                    <button class="daily-echo__document" onclick={(event) => openFromClick(event, dailyEcho.path)} onauxclick={(event) => openFromClick(event, dailyEcho.path)}>
                       <strong>{dailyEcho.name.replace(/\.(md|markdown|mdx)$/i, '')}</strong>
                       {#if dailyEchoPreviewLoading}
                         <span class="daily-echo__preview daily-echo__preview--loading"></span>
@@ -2100,7 +2313,7 @@
                     <p class="daily-echo__path">{dailyEcho.path.replace(folderPath, '').replace(/^[/\\]/, '')}</p>
                   </div>
                   <div class="daily-echo__actions">
-                    <button class="daily-echo__open" onclick={() => openSpecificFile(dailyEcho.path)}>{t('daily_echo.open')}<span>→</span></button>
+                    <button class="daily-echo__open" onclick={(event) => openFromClick(event, dailyEcho.path)} onauxclick={(event) => openFromClick(event, dailyEcho.path)}>{t('daily_echo.open')}<span>→</span></button>
                     <button class:daily-echo__helpful--saved={rediscoveryPreferences[dailyEcho.path]?.lastHelpfulDay === currentDayKey} class="daily-echo__helpful" onclick={() => markDailyEchoHelpful(dailyEcho)}>
                       {rediscoveryPreferences[dailyEcho.path]?.lastHelpfulDay === currentDayKey ? '✓ ' + t('daily_echo.helpful_saved') : '♡ ' + t('daily_echo.helpful')}
                     </button>
@@ -2139,7 +2352,7 @@
               <div class="workspace-card__heading"><span>↳</span><h3>{t('workspace.continue')}</h3></div>
                 <div class="document-list">
                   {#each moreContinueDocuments as doc}
-                    <button onclick={() => openSpecificFile(doc.path)}><span>{doc.name}</span><small>{t('workspace.last_read')}{formatLastRead(doc.path)} · {progressPercent(doc.path)}%</small><i class="document-list__progress"><i style="width: {progressPercent(doc.path)}%"></i></i></button>
+                    <button onclick={(event) => openFromClick(event, doc.path)} onauxclick={(event) => openFromClick(event, doc.path)}><span>{doc.name}</span><small>{t('workspace.last_read')}{formatLastRead(doc.path)} · {progressPercent(doc.path)}%</small><i class="document-list__progress"><i style="width: {progressPercent(doc.path)}%"></i></i></button>
                   {/each}
                 </div>
             </section>
@@ -2149,7 +2362,7 @@
               {#if pinnedDocuments.length}
                 <div class="document-list">
                   {#each pinnedDocuments as doc}
-                    <button onclick={() => openSpecificFile(doc.path)}><span>{doc.name}</span><small>{doc.path.replace(folderPath, '').replace(/^\//, '')}</small></button>
+                    <button onclick={(event) => openFromClick(event, doc.path)} onauxclick={(event) => openFromClick(event, doc.path)}><span>{doc.name}</span><small>{doc.path.replace(folderPath, '').replace(/^\//, '')}</small></button>
                   {/each}
                 </div>
               {:else}<p class="workspace-card__empty">{t('workspace.empty_pinned')}</p>{/if}
@@ -2159,7 +2372,7 @@
               {#if recentDocuments.length}
                 <div class="document-list">
                   {#each recentDocuments as doc}
-                    <button onclick={() => openSpecificFile(doc.path)}><span>{doc.name}</span><small>{doc.path.replace(folderPath, '').replace(/^\//, '')}</small></button>
+                    <button onclick={(event) => openFromClick(event, doc.path)} onauxclick={(event) => openFromClick(event, doc.path)}><span>{doc.name}</span><small>{doc.path.replace(folderPath, '').replace(/^\//, '')}</small></button>
                   {/each}
                 </div>
               {:else}<p class="workspace-card__empty">{t('workspace.empty_recent')}</p>{/if}
@@ -2171,6 +2384,9 @@
               <div><small>{t('feedback.nudge_eyebrow')}</small><strong>{t('feedback.nudge_title')}</strong><p>{t('feedback.nudge_text')}</p></div>
               <div class="feedback-nudge__actions"><button onclick={() => sendFeedback('after-reading')}>{t('feedback.nudge_share')}</button><button onclick={dismissFeedbackNudge}>{t('feedback.nudge_later')}</button></div>
             </aside>
+          {/if}
+          {#if !tabsDiscovered && markdownFiles.length > 1}
+            <p class="tabs-tip">{isMac ? t('tabs.tip_mac') : t('tabs.tip')}</p>
           {/if}
           <button class="workspace-change" onclick={openFolder}>{t('workspace.change_folder')}</button>
         {:else}
@@ -2293,7 +2509,7 @@
             <div class="command-group__heading" id={`search-group-${groupIndex}`}><strong>{group.file_name}</strong><small title={group.file_path}>{documentContext(group.file_path, sourcePaths)}</small></div>
             {#each group.matches as result}
               {@const index = globalSearchResults.findIndex(hit => hit.file_path === result.file_path && hit.line_number === result.line_number)}
-              <button id={`search-result-${index}`} role="option" aria-selected={index === selectedSearchIndex} aria-describedby={`search-group-${groupIndex}`} tabindex="-1" class:command-result--selected={index === selectedSearchIndex} class="command-result" onclick={() => { openSearchResult(result, globalSearchQuery); closeGlobalSearch(); }}>
+              <button id={`search-result-${index}`} role="option" aria-selected={index === selectedSearchIndex} aria-describedby={`search-group-${groupIndex}`} tabindex="-1" class:command-result--selected={index === selectedSearchIndex} class="command-result" onclick={(event) => { openSearchResult(result, globalSearchQuery, opensInNewTab(event)); closeGlobalSearch(); }}>
                 <span class="command-result__line">L{result.line_number}</span><span class="command-result__body"><span class="command-result__snippet">{@render searchExcerpt(result.snippet, globalSearchQuery)}</span></span>
               </button>
             {/each}
@@ -2411,7 +2627,22 @@
   .command-result--selected { background: var(--color-primary-alpha-10) !important; box-shadow: inset 2px 0 var(--color-primary); }
   @media (max-width: 700px) { .reading-toolbar__search kbd { display: none; } .reading-toolbar { flex-wrap: wrap; } }
   .reading-toolbar + .welcome { min-height: calc(100vh - 52px); }
-  :global(.md-reader__markdown-content :is(h1, h2, h3, h4, h5, h6)) { scroll-margin-top: 72px; }
+  .tab-strip { position: sticky; top: 0; z-index: 31; display: flex; align-items: flex-end; gap: 2px; height: 38px; padding: 6px 12px 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent); background: color-mix(in srgb, var(--color-side-bg) 70%, var(--color-bg)); }
+  .tab-strip::-webkit-scrollbar { display: none; }
+  .tab-strip__tab { position: relative; display: flex; flex: 0 1 200px; align-items: center; min-width: 104px; height: 32px; margin-bottom: -1px; border: 1px solid transparent; border-bottom: 0; border-radius: 9px 9px 0 0; color: var(--color-text-gray); transition: background .15s ease, color .15s ease; }
+  .tab-strip__tab:hover { color: var(--color-text-secondary); background: color-mix(in srgb, var(--color-bg) 55%, transparent); }
+  .tab-strip__tab--active, .tab-strip__tab--active:hover { color: var(--color-text-primary); border-color: color-mix(in srgb, var(--color-border) 75%, transparent); background: var(--color-bg); }
+  .tab-strip__tab > button[role='tab'] { flex: 1; min-width: 0; height: 100%; padding: 0 4px 0 12px; border: 0; color: inherit; background: transparent; font: 500 12px var(--font-family-body); text-align: left; cursor: pointer; }
+  .tab-strip__tab--active > button[role='tab'] { font-weight: 650; }
+  .tab-strip__tab > button[role='tab'] span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab-strip__close { flex: none; width: 22px; height: 22px; margin-right: 6px; padding: 0; border: 0; border-radius: 6px; color: inherit; background: transparent; font-size: 15px; line-height: 1; cursor: pointer; opacity: 0; }
+  .tab-strip__tab:hover .tab-strip__close, .tab-strip__tab--active .tab-strip__close, .tab-strip__close:focus-visible { opacity: .7; }
+  .tab-strip__close:hover { background: var(--color-primary-alpha-10); opacity: 1; }
+  .tab-strip__new { flex: none; align-self: center; width: 28px; height: 28px; margin-left: 4px; border: 0; border-radius: 8px; color: var(--color-text-gray); background: transparent; cursor: pointer; }
+  .tab-strip__new:hover { color: var(--color-primary); background: var(--color-primary-alpha-10); }
+  .reading-toolbar.reading-toolbar--under-tabs { top: 38px; }
+  .tabs-tip { margin: 22px 0 0; color: var(--color-text-gray); font-size: 12px; }
+  :global(.md-reader__markdown-content :is(h1, h2, h3, h4, h5, h6)) { scroll-margin-top: var(--reader-chrome-height, 72px); }
   /* Shared rhythm for controls, panels and feedback. */
   :global(:root) { --motion-ease: cubic-bezier(.2, .8, .2, 1); }
   :global(button:focus-visible), :global(summary:focus-visible), :global(select:focus-visible) { outline: 2px solid var(--color-primary); outline-offset: 3px; }
