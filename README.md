@@ -4,7 +4,7 @@
   <p><strong>A calm, local-first reading space that brings forgotten Markdown notes back to you.</strong></p>
   <p><strong>English</strong> · <a href="./README_zh-CN.md">简体中文</a></p>
   <p><a href="https://insight4core.github.io/markdown_reader/en/">Website</a> · <a href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download</a></p>
-  <p><a href="./docs/RELEASE_NOTES_v0.8.1.md">What's new in 0.8.1</a></p>
+  <p><a href="./docs/RELEASE_NOTES_v0.9.0.md">What's new in 0.9.0</a></p>
 </div>
 
 ## Early Access
