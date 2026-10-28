@@ -11,7 +11,8 @@ import mFootnote from 'markdown-it-footnote'
 import mTaskLists from 'markdown-it-task-lists'
 import mToc from 'markdown-it-table-of-contents'
 import mKatex from '@traptitech/markdown-it-katex'
-import mMermaid from '@md-reader/markdown-it-mermaid'
+import 'katex/dist/katex.min.css'
+import { markdownItMermaid } from '$lib/mermaid-diagrams'
 import mAlert from '@/plugins/alert'
 import mMultimdTable from 'markdown-it-multimd-table'
 import MD_PLUGINS from '@/config/md-plugins'
@@ -29,10 +30,8 @@ const PLUGINS: Plugins = {
   Ins: [mIns],
   Abbr: [mAbbr],
   Katex: [mKatex],
-  Mermaid: ({ theme }) => [
-    mMermaid,
-    { theme: theme === 'dark' ? 'dark' : 'default', themeVariables: undefined },
-  ],
+  // Diagrams are drawn after the HTML is on the page (see renderMermaidDiagrams).
+  Mermaid: [markdownItMermaid],
   Mark: [mMark],
   Deflist: [mDeflist],
   Footnote: [mFootnote],

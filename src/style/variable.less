@@ -335,3 +335,19 @@
     background: var(--color-scrollbar-thumb-hover);
   }
 }
+
+// Paper is white whatever theme is on screen.
+@media print {
+  :root,
+  :root[data-md-reader-theme] .md-reader,
+  :root[data-md-reader-theme] body {
+    .light();
+    --color-bg: #fff;
+    --color-code-bg: #f3f4f1;
+  }
+
+  // Beats the theme's own color-scheme rule (same specificity, declared later).
+  :root:not([data-md-reader-theme-scheme-disabled])[data-md-reader-theme] {
+    color-scheme: light;
+  }
+}

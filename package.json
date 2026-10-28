@@ -16,7 +16,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@md-reader/markdown-it-mermaid": "^0.6.0-beta.0",
     "@md-reader/theme": "^2.0.2",
     "@mdit/plugin-alert": "^0.23.2",
     "@smui/button": "^8.0.3",
@@ -26,6 +25,7 @@
     "@smui/select": "^8.0.3",
     "@smui/switch": "^8.0.3",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-fs": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2",
@@ -34,6 +34,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@traptitech/markdown-it-katex": "^3.6.0",
     "highlight.js": "^11.11.1",
+    "katex": "^0.16.44",
     "lodash.debounce": "^4.0.8",
     "lodash.throttle": "^4.1.1",
     "markdown-it": "^14.1.1",
@@ -48,7 +49,8 @@
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-table-of-contents": "^1.2.0",
-    "markdown-it-task-lists": "^2.1.1"
+    "markdown-it-task-lists": "^2.1.1",
+    "mermaid": "^11.14.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

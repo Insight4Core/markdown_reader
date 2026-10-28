@@ -6,13 +6,16 @@
   import { resolve, dirname, join } from '@tauri-apps/api/path';
   import { i18nState, t, systemLanguageTag } from '$lib/i18n.svelte';
   import { resolveLocale } from '$lib/locale';
+  import { articleHtmlForClipboard } from '$lib/export-document';
+  import { renderMermaidDiagrams } from '$lib/mermaid-diagrams';
+  import { writeHtml, writeText as writeClipboardText } from '@tauri-apps/plugin-clipboard-manager';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { openUrl } from '@tauri-apps/plugin-opener';
   import { mdRender } from '@/core/markdown';
-  import { tick, onMount } from 'svelte';
+  import { tick, onMount, untrack } from 'svelte';
   import { fade, fly, slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { parseReadingLink, fragmentCandidates } from '$lib/reading-links';
@@ -72,6 +75,12 @@
           toggleSidebar();
         }
       }
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p' && filePath) {
+        // Print the note, not the app window.
+        event.preventDefault();
+        void exportPdf();
+      }
+      if (event.key === 'Escape' && exportMenuOpen) exportMenuOpen = false;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         openGlobalSearch();
@@ -81,6 +90,10 @@
       else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) closeEchoPeek();
     };
     window.addEventListener('keydown', handleGlobalShortcut);
+    const closeExportMenu = (event: MouseEvent) => {
+      if (exportMenuOpen && !(event.target as Element | null)?.closest?.('.export-menu')) exportMenuOpen = false;
+    };
+    window.addEventListener('click', closeExportMenu);
     requestAnimationFrame(() => {
       const readingBody = document.querySelector('.md-reader__body');
       if (!readingBody || typeof ResizeObserver === 'undefined') return;
@@ -97,6 +110,7 @@
       window.removeEventListener('scroll', saveReadingProgress);
       document.removeEventListener('click', handleMarkdownClick, true);
       window.removeEventListener('keydown', handleGlobalShortcut);
+      window.removeEventListener('click', closeExportMenu);
       window.clearInterval(dayRefreshTimer);
       window.clearInterval(recentChangesTimer);
       window.removeEventListener('focus', refreshRecentChanges);
@@ -122,6 +136,7 @@
   let appFont = $state('auto');
   /** False while the language follows the system; true once the reader picks one in Settings. */
   let localeChosen = $state(false);
+  let exportMenuOpen = $state(false);
   let customFontInput = $state('');
   
   let sidebarTab = $state<'files' | 'toc'>('toc');
@@ -318,7 +333,9 @@
 
   $effect(() => {
     const appTitle = t('misc.reader_title');
-    if (typeof document !== 'undefined') document.title = appTitle;
+    const noteTitle = filePath ? (filePath.split(/[/\\]/).pop() || '').replace(/\.(md|markdown|mdx)$/i, '') : '';
+    // While reading, the note's name is also what the print dialog proposes for the PDF.
+    if (typeof document !== 'undefined') document.title = noteTitle || appTitle;
     if (typeof window !== 'undefined' && !folderPath && !filePath && '__TAURI_INTERNALS__' in window) {
       void getCurrentWindow().setTitle(appTitle);
     }
@@ -594,6 +611,8 @@
         await tick();
         if (requestedPath !== filePath) return;
         await loadRelativeImages(requestedPath);
+        if (requestedPath !== filePath) return;
+        await drawDiagrams();
         if (requestedPath !== filePath) return;
         {
            const article = document.querySelector('.md-reader__markdown-content');
@@ -925,6 +944,61 @@
       else await activateWorkspaceFolder(folder);
     } catch {
       showToast(t('workspace.drop_unsupported'));
+    }
+  }
+
+  function drawDiagrams() {
+    const article = document.querySelector('.md-reader__markdown-content');
+    if (!article) return Promise.resolve();
+    return renderMermaidDiagrams(article, {
+      dark: ['dark', 'terminal', 'glass'].includes(currentTheme),
+      errorLabel: t('diagram.error')
+    }).catch(error => console.warn('Unable to render Mermaid diagrams:', error));
+  }
+
+  // Diagrams are drawn in the theme's colours, so redraw them when the theme changes.
+  $effect(() => {
+    void currentTheme;
+    untrack(() => { if (filePath) void drawDiagrams(); });
+  });
+
+  async function copyArticleAsRichText() {
+    exportMenuOpen = false;
+    const article = document.querySelector('.md-reader__markdown-content');
+    if (!article || !filePath) return;
+    try {
+      const html = await articleHtmlForClipboard(article);
+      // Plain-text targets (terminals, chat boxes, code editors) get the Markdown itself.
+      await writeHtml(html, await readTextFile(filePath));
+      showToast(t('export.copied_rich'));
+    } catch (error) {
+      console.error('Copy as rich text failed:', error);
+      showToast(t('export.copy_failed'));
+    }
+  }
+
+  async function copyMarkdownSource() {
+    exportMenuOpen = false;
+    if (!filePath) return;
+    try {
+      await writeClipboardText(await readTextFile(filePath));
+      showToast(t('export.copied_markdown'));
+    } catch (error) {
+      console.error('Copy Markdown failed:', error);
+      showToast(t('export.copy_failed'));
+    }
+  }
+
+  async function exportPdf() {
+    exportMenuOpen = false;
+    if (!filePath) return;
+    try {
+      // Opens the system print dialog; "Save as PDF" lives there on every platform.
+      // Goes through Rust so macOS gets page margins that match the print stylesheet.
+      await invoke('print_document');
+    } catch (error) {
+      console.error('Print failed:', error);
+      showToast(t('export.print_failed'));
     }
   }
 
@@ -1921,6 +1995,22 @@
         <button bind:this={echoTrigger} class="reading-toolbar__echo" onclick={() => compactEchoMode ? openEchoPeek() : knowledgeEchoExpanded = true} aria-label={compactEchoLabel()} aria-haspopup={compactEchoMode ? 'dialog' : undefined} aria-controls={compactEchoMode ? 'echo-peek' : 'echo-sidebar-content'} aria-expanded={knowledgeEchoExpanded}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M7 5a9 9 0 0 0 0 14M17 5a9 9 0 0 1 0 14"/></svg><span>{t('echo.title')}</span><small>{knowledgeEchoes.length}</small></button>
       {/if}
       <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath || isStandaloneFile} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
+      {#if filePath && !readingError}
+        <div class="export-menu">
+          <button class="export-menu__trigger" aria-haspopup="menu" aria-expanded={exportMenuOpen} aria-controls="export-menu-list" title={t('export.menu')} onclick={() => exportMenuOpen = !exportMenuOpen}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
+            <span>{t('export.menu')}</span>
+          </button>
+          {#if exportMenuOpen}
+            <div class="export-menu__list" id="export-menu-list" role="menu" transition:fly={{ y: -4, duration: reducedMotion ? 0 : 140 }}>
+              <button role="menuitem" onclick={copyArticleAsRichText}><strong>{t('export.copy_rich')}</strong><small>{t('export.copy_rich_hint')}</small></button>
+              <button role="menuitem" onclick={copyMarkdownSource}><strong>{t('export.copy_markdown')}</strong><small>{t('export.copy_markdown_hint')}</small></button>
+              <span class="export-menu__divider" aria-hidden="true"></span>
+              <button role="menuitem" onclick={exportPdf}><strong>{t('export.pdf')}</strong><small>{t('export.pdf_hint')}</small><kbd>⌘ / Ctrl P</kbd></button>
+            </div>
+          {/if}
+        </div>
+      {/if}
       {#if readingHistory[readingHistoryIndex]?.fromEcho && readingHistoryIndex > 0}
         <button class="reading-toolbar__return" disabled={navigating} onclick={() => navigateReadingHistory(-1)}>{t('navigation.return_reading')}</button>
       {/if}
@@ -2307,6 +2397,15 @@
   .reading-toolbar .reading-toolbar__return { margin-left: 8px; min-width: 0; font-size: 12px; color: var(--color-primary); }
   .reading-toolbar .reading-toolbar__search { margin-left: auto; gap: 10px; font-size: 12px; }
   .reading-toolbar__search kbd { color: var(--color-text-gray); font-size: 10px; }
+  .export-menu { position: relative; margin-left: 4px; }
+  .reading-toolbar .export-menu__trigger { gap: 6px; font-size: 12px; }
+  .export-menu__list { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; display: grid; width: 268px; padding: 6px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-bg); box-shadow: 0 14px 36px color-mix(in srgb, var(--color-text-primary) 14%, transparent); }
+  .reading-toolbar .export-menu__list button { display: grid; grid-template-columns: 1fr auto; justify-content: stretch; justify-items: start; gap: 2px 10px; padding: 9px 10px; border-radius: 8px; color: var(--color-text-primary); text-align: left; }
+  .export-menu__list strong { font-size: 13px; font-weight: 600; }
+  .export-menu__list small { grid-column: 1; color: var(--color-text-gray); font-size: 11px; line-height: 1.4; }
+  .export-menu__list kbd { grid-column: 2; grid-row: 1; color: var(--color-text-gray); font-size: 10px; }
+  .export-menu__divider { height: 1px; margin: 4px 6px; background: var(--color-border); }
+  @media (max-width: 700px) { .reading-toolbar .export-menu__trigger span { display: none; } }
   .reading-toolbar .reading-toolbar__echo { gap: 7px; margin-left: 8px; color: var(--color-primary); font-size: 12px; }
   .reading-toolbar__echo small { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; background: var(--color-primary-alpha-10); font-size: 11px; font-variant-numeric: tabular-nums; }
   .command-result--selected { background: var(--color-primary-alpha-10) !important; box-shadow: inset 2px 0 var(--color-primary); }

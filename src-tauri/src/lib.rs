@@ -657,6 +657,67 @@ async fn search_content(
     Ok(results)
 }
 
+/// Page margins for Export PDF / Print, in millimetres. They must match the `@page` margin in
+/// src/style/index.less: on macOS WebKit counts pages with these values but lays them out with
+/// the CSS ones, so any difference drops the end of the note from the PDF.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PRINT_MARGIN_TOP_BOTTOM_MM: f64 = 16.0;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PRINT_MARGIN_LEFT_RIGHT_MM: f64 = 15.0;
+
+/// Open the system print dialog for the note being read ("Save as PDF" lives there).
+#[tauri::command]
+fn print_document(webview: tauri::Webview) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Tauri's own print passes zero margins to WebKit (see the constants above).
+        webview
+            .with_webview(|platform| unsafe { macos_print::run(platform.inner()) })
+            .map_err(|error| error.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        webview.print().map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_print {
+    use super::{PRINT_MARGIN_LEFT_RIGHT_MM, PRINT_MARGIN_TOP_BOTTOM_MM};
+    use objc2_app_kit::NSPrintInfo;
+    use objc2_web_kit::WKWebView;
+
+    const POINTS_PER_MM: f64 = 72.0 / 25.4;
+
+    /// Safety: `webview` must be the WKWebView pointer Tauri hands to `with_webview`,
+    /// and this must run on the main thread (which `with_webview` guarantees).
+    pub unsafe fn run(webview: *mut std::ffi::c_void) {
+        let webview = &*(webview as *const WKWebView);
+        let print_info = NSPrintInfo::sharedPrintInfo();
+        let top_bottom = PRINT_MARGIN_TOP_BOTTOM_MM * POINTS_PER_MM;
+        let left_right = PRINT_MARGIN_LEFT_RIGHT_MM * POINTS_PER_MM;
+        print_info.setTopMargin(top_bottom);
+        print_info.setBottomMargin(top_bottom);
+        print_info.setLeftMargin(left_right);
+        print_info.setRightMargin(left_right);
+
+        let operation = webview.printOperationWithPrintInfo(&print_info);
+        // Let the print sheet run without blocking the reader.
+        operation.setCanSpawnSeparateThread(true);
+        match webview.window() {
+            Some(window) => operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo(
+                &window,
+                None,
+                None,
+                std::ptr::null_mut(),
+            ),
+            None => {
+                operation.runOperation();
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -682,11 +743,13 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             search_content,
             find_knowledge_echoes,
-            recent_markdown_changes
+            recent_markdown_changes,
+            print_document
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

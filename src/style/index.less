@@ -187,7 +187,8 @@ body.md-reader {
         p {
           line-height: inherit;
           margin-bottom: 1.2em;
-          text-wrap: pretty;
+          // Plain wrapping on purpose: WebKit's `text-wrap: pretty` breaks lines early to even
+          // out a paragraph, which leaves ragged gaps on the right in Chinese text.
         }
 
         img { border-radius: 10px; box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 9%, transparent); }
@@ -578,3 +579,212 @@ body.md-reader {
 }
 
 @keyframes drop-overlay-in { from { opacity: 0; transform: scale(.99); } to { opacity: 1; transform: scale(1); } }
+
+// Mermaid diagrams (drawn by src/lib/mermaid-diagrams.ts).
+// Until a diagram is drawn its source is hidden behind a quiet placeholder.
+.md-reader__markdown-content {
+  pre.mermaid,
+  .mermaid-diagram--pending {
+    min-height: 120px;
+    border-radius: 8px;
+    color: transparent !important;
+    background: var(--color-code-bg);
+    overflow: hidden;
+    animation: diagram-pending 1.1s ease-in-out infinite alternate;
+  }
+
+  .mermaid-diagram {
+    margin: 1.2em 0;
+    text-align: center;
+
+    svg {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+
+  .mermaid-diagram__paper {
+    display: none;
+  }
+
+  .mermaid-diagram--failed {
+    text-align: left;
+  }
+
+  .mermaid-diagram__error {
+    margin: 0 0 0.4em;
+    color: var(--color-text-gray);
+    font-size: 13px;
+  }
+}
+
+@keyframes diagram-pending {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-reader__markdown-content :is(pre.mermaid, .mermaid-diagram--pending) {
+    animation: none;
+  }
+}
+
+// Export PDF / Print: only the note itself goes on paper.
+@media print {
+  // Paper is white, so print the light drawing even when reading in a dark theme.
+  .md-reader__markdown-content .mermaid-diagram__screen {
+    display: none !important;
+  }
+
+  .md-reader__markdown-content .mermaid-diagram__paper {
+    display: block !important;
+  }
+}
+
+@media print {
+  // Must match PRINT_MARGIN_* in src-tauri/src/lib.rs: macOS counts pages with those values,
+  // so a mismatch silently drops the end of the note from the PDF.
+  @page {
+    margin: 16mm 15mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  // Switching to print media must not start the screen's colour transitions,
+  // or the page is captured halfway from the dark theme to white.
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .md-reader__side,
+  .sidebar-resizer,
+  .reading-toolbar,
+  .reading-context,
+  .reading-error,
+  .reading-progress,
+  .single-reading-guide,
+  .knowledge-echo,
+  .floating-gear,
+  .app-toast,
+  .file-drop-overlay,
+  .drawer,
+  .drawer-overlay,
+  .md-reader__btn,
+  .md-reader__button-wrap,
+  dialog {
+    display: none !important;
+  }
+
+  .md-reader__body,
+  .side-expanded .md-reader__body,
+  .side-collapsed .md-reader__body {
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+  }
+
+  .reading-shell {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .md-reader__markdown-content,
+  .md-reader__markdown-content.centered {
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    animation: none !important;
+
+    // Code and quotes continue on the next page like running text. Keeping a long code
+    // block whole pushes it to the next page and leaves most of the current one empty.
+    pre,
+    pre > code {
+      overflow: visible !important;
+      max-height: none !important;
+    }
+
+    p,
+    li,
+    blockquote,
+    pre {
+      orphans: 3;
+      widows: 3;
+    }
+
+    // Pictures are unreadable when cut, so they stay whole.
+    img,
+    figure,
+    svg,
+    .mermaid-diagram,
+    .katex-display {
+      break-inside: avoid;
+    }
+
+    // Tables may span pages, but rows are not cut and the header repeats.
+    thead {
+      display: table-header-group;
+    }
+
+    tr {
+      break-inside: avoid;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+      break-inside: avoid;
+      break-after: avoid;
+    }
+
+    // Keep a caption ("表 12.3 …") with its table, an image with the caption under it, and a
+    // lead-in sentence ("如下所示：") with the code that follows.
+    p:has(+ table),
+    p:has(+ img),
+    p:has(> img:only-child),
+    p:has(+ pre) {
+      break-after: avoid;
+    }
+
+    // Figures written as HTML (<div><p>表 12.1 …</p><img></div>) stay on one page.
+    div:has(> img):has(> p):not(:has(> img ~ img)) {
+      break-inside: avoid;
+    }
+
+    // The language tag sits in the corner of the code block and covers long first lines on paper.
+    pre > code[lang]::before,
+    pre > code.hljs[lang]:before {
+      display: none !important;
+      content: none !important;
+    }
+
+    // macOS leaves "Print backgrounds" off by default; without these the reader can no
+    // longer see where code starts and ends.
+    pre,
+    code,
+    th,
+    thead,
+    blockquote,
+    mark,
+    .markdown-alert {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    a {
+      color: inherit;
+    }
+  }
+}

@@ -26,10 +26,16 @@ tauri-plugin-dialog = "2.7.0"
 tauri-plugin-fs = "2.5.0"
 tauri-plugin-process = "2"
 tauri-plugin-store = "2.2.0"
+tauri-plugin-clipboard-manager = "=2.3.2"
 ignore = "0.4.22"
 rayon = "1.10.0"
 tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+# Native print on macOS (see print_document in src/lib.rs). Same versions Tauri already uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSPrintInfo", "NSPrintOperation", "NSResponder", "NSView", "NSWindow"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
 
