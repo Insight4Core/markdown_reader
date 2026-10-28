@@ -49,3 +49,18 @@ export function documentContext(path: string, roots: string[]): string {
   if (root) return `${root.split('/').pop()} / ${normalized.slice(root.length + 1)}`;
   return normalized.split('/').slice(-2).join(' / ');
 }
+
+export type ChangeStatus = 'new' | 'updated' | 'read';
+
+/** A change is "new" if the reader has never opened the note, and "updated" if it changed after they last saw it. */
+export function changeStatus(modifiedAt: number, seenAt?: number): ChangeStatus {
+  if (!seenAt) return 'new';
+  return seenAt < modifiedAt ? 'updated' : 'read';
+}
+
+/** The folder a note lives in, relative to the knowledge source that contains it (without the file name). */
+export function documentLocation(path: string, roots: string[]): string {
+  const context = documentContext(path, roots);
+  const slash = context.lastIndexOf('/');
+  return slash === -1 ? context : context.slice(0, slash).replace(/\s+$/, '');
+}

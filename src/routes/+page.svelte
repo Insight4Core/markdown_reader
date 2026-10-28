@@ -4,7 +4,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { load } from '@tauri-apps/plugin-store';
   import { resolve, dirname, join } from '@tauri-apps/api/path';
-  import { i18nState, t, detectSystemLanguage } from '$lib/i18n.svelte';
+  import { i18nState, t, systemLanguageTag } from '$lib/i18n.svelte';
+  import { resolveLocale } from '$lib/locale';
   import { check } from '@tauri-apps/plugin-updater';
   import { relaunch } from '@tauri-apps/plugin-process';
   import { invoke } from '@tauri-apps/api/core';
@@ -15,7 +16,7 @@
   import { fade, fly, slide } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import { parseReadingLink, fragmentCandidates } from '$lib/reading-links';
-  import { readingPercent, unfinishedDocuments, groupSearchHits, highlightParts, documentContext } from '$lib/reading-presentation';
+  import { readingPercent, unfinishedDocuments, groupSearchHits, highlightParts, documentContext, changeStatus, documentLocation } from '$lib/reading-presentation';
   import '@/style/index.less';
 
   onMount(() => {
@@ -27,6 +28,10 @@
     let unlistenDrop: (() => void) | null = null;
     let echoResizeObserver: ResizeObserver | null = null;
     const dayRefreshTimer = window.setInterval(() => currentDayKey = localDayKey(), 60000);
+    // Notes written by other apps (often AI tools) should show up without a manual refresh.
+    const refreshRecentChanges = () => { if (folderPath && !filePath) recentChangesRefresh += 1; };
+    const recentChangesTimer = window.setInterval(refreshRecentChanges, RECENT_CHANGES_POLL_MS);
+    window.addEventListener('focus', refreshRecentChanges);
     if ('__TAURI_INTERNALS__' in window) {
       unlistenPromise = listen('sys-open-file', (event) => {
         const path = event.payload as string;
@@ -93,6 +98,8 @@
       document.removeEventListener('click', handleMarkdownClick, true);
       window.removeEventListener('keydown', handleGlobalShortcut);
       window.clearInterval(dayRefreshTimer);
+      window.clearInterval(recentChangesTimer);
+      window.removeEventListener('focus', refreshRecentChanges);
       echoResizeObserver?.disconnect();
       unlistenPromise?.then(unlisten => unlisten());
       unlistenDrop?.();
@@ -113,6 +120,8 @@
   let showSidebar = $state(true);
   let currentTheme = $state('light');
   let appFont = $state('auto');
+  /** False while the language follows the system; true once the reader picks one in Settings. */
+  let localeChosen = $state(false);
   let customFontInput = $state('');
   
   let sidebarTab = $state<'files' | 'toc'>('toc');
@@ -129,6 +138,19 @@
   let recentFiles = $state<string[]>([]);
   let pinnedFiles = $state<string[]>([]);
   let readingProgress = $state<Record<string, { position: number; total: number; updatedAt: number }>>({});
+  /** When each note was last opened or shown, so edits made afterwards can be flagged. */
+  let lastSeenAt = $state<Record<string, number>>({});
+  interface RecentChange {
+    file_path: string;
+    file_name: string;
+    modified_at: number;
+  }
+  const RECENT_CHANGES_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+  const RECENT_CHANGES_POLL_MS = 30000;
+  const LAST_SEEN_LIMIT = 500;
+  let recentChanges = $state<RecentChange[]>([]);
+  let recentChangesRefresh = $state(0);
+  let recentChangesRequest = 0;
   interface RediscoveryPreference {
     snoozedUntil?: number;
     dismissed?: boolean;
@@ -309,6 +331,32 @@
     .filter((file): file is FolderEntry => Boolean(file) && !continueDocuments.some(doc => doc.path === file!.path)));
   let pinnedDocuments = $derived(pinnedFiles.map(path => markdownFiles.find(file => file.path === path)).filter((file): file is FolderEntry => Boolean(file)));
   let dailyEcho = $derived(buildDailyEcho());
+  let recentChangeItems = $derived(recentChanges.map(change => ({
+    ...change,
+    status: changeStatus(change.modified_at, seenAt(change.file_path))
+  })));
+  let recentNewCount = $derived(recentChangeItems.filter(change => change.status === 'new').length);
+  let recentUpdatedCount = $derived(recentChangeItems.filter(change => change.status === 'updated').length);
+  $effect(() => {
+    const roots = sourcePaths;
+    const onHome = Boolean(folderPath) && !filePath && !standaloneFilePath;
+    void recentChangesRefresh;
+    if (!onHome || roots.length === 0) return;
+    const request = ++recentChangesRequest;
+    void (async () => {
+      try {
+        const changes = await invoke('recent_markdown_changes', {
+          rootPaths: roots,
+          sinceMs: Date.now() - RECENT_CHANGES_WINDOW_MS,
+          limit: 8
+        }) as RecentChange[];
+        if (request === recentChangesRequest) recentChanges = changes;
+      } catch (error) {
+        console.warn('Unable to load recent changes:', error);
+        if (request === recentChangesRequest) recentChanges = [];
+      }
+    })();
+  });
   $effect(() => {
     if (!dailyEchoReady || !folderPath || markdownFiles.length === 0) return;
     const saved = dailyEchoSelections[folderPath];
@@ -348,12 +396,14 @@
     await store.set('showSidebar', showSidebar);
     await store.set('sidebarTab', sidebarTab);
     await store.set('locale', i18nState.locale);
+    await store.set('localeChosen', localeChosen);
     await store.set('appTheme', currentTheme);
     await store.set('appFont', appFont);
     await store.set('customFontInput', customFontInput);
     await store.set('recentFiles', recentFiles);
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
+    await store.set('lastSeenAt', lastSeenAt);
     await store.set('rediscoveryPreferences', rediscoveryPreferences);
     await store.set('dailyEchoFinishedDay', dailyEchoFinishedDay);
     await store.set('dailyEchoSelections', dailyEchoSelections);
@@ -386,14 +436,16 @@
       try {
         store = await load('.settings.dat', { autoSave: false });
 
-        const savedLocale = await store.get<{value?: string} | string>('locale');
-        if (savedLocale) {
-            i18nState.locale = typeof savedLocale === 'string' ? savedLocale : (savedLocale.value || 'zh');
-        } else {
-            i18nState.locale = detectSystemLanguage();
-            // Automatically persist detection for future runs
-            if (store) store.set('locale', i18nState.locale);
-        }
+        const savedLocale = await store.get('locale') as { value?: string } | string | null;
+        const resolvedLocale = resolveLocale(
+          typeof savedLocale === 'string' ? savedLocale : savedLocale?.value,
+          await store.get('localeChosen'),
+          systemLanguageTag()
+        );
+        i18nState.locale = resolvedLocale.locale;
+        localeChosen = resolvedLocale.chosen;
+        store.set('locale', i18nState.locale);
+        store.set('localeChosen', localeChosen);
 
         const savedTheme = await store.get<{value?: string} | string>('appTheme');
         if (savedTheme) {
@@ -434,6 +486,8 @@
         if (Array.isArray(savedPinned)) pinnedFiles = savedPinned;
         const savedProgress = await store.get<Record<string, { position: number; total: number; updatedAt: number }>>('readingProgress');
         if (savedProgress && typeof savedProgress === 'object') readingProgress = savedProgress;
+        const savedLastSeen = await store.get('lastSeenAt') as Record<string, number> | null;
+        if (savedLastSeen && typeof savedLastSeen === 'object') lastSeenAt = savedLastSeen;
         const savedRediscoveryPreferences = await store.get<Record<string, RediscoveryPreference>>('rediscoveryPreferences');
         if (savedRediscoveryPreferences && typeof savedRediscoveryPreferences === 'object') rediscoveryPreferences = savedRediscoveryPreferences;
         const savedDailyEchoFinishedDay = await store.get<string>('dailyEchoFinishedDay');
@@ -696,6 +750,7 @@
 
   async function activateWorkspaceFolder(path: string) {
     resetWorkspaceReadingState();
+    recentChanges = [];
     folderPath = path;
     folderFiles = await scanWorkspaceSources();
     sidebarTab = 'files';
@@ -952,6 +1007,7 @@
     filePath = path;
     if ('__TAURI_INTERNALS__' in window) void getCurrentWindow().setTitle(filePath.split(/[/\\]/).pop() || t('misc.reader_title'));
     recentFiles = [path, ...recentFiles.filter(item => item !== path)].slice(0, 8);
+    markSeen(path);
     await loadContent(html, { ...options, position: options.position ?? readingProgress[path]?.position ?? 0 });
     if (request !== navigationRequest) return false;
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
@@ -967,7 +1023,11 @@
 
     try {
       const stopWatching = await watch(path, () => {
-        if (filePath === path) void loadContent();
+        if (filePath !== path) return;
+        // The reader is looking at this note, so the edit has been seen.
+        markSeen(path);
+        void loadContent();
+        void syncStore();
       }, { delayMs: 100 });
       if (request === navigationRequest) unwatch = stopWatching;
       else stopWatching();
@@ -1501,14 +1561,36 @@
     syncStore();
   }
 
+  function seenAt(path: string): number | undefined {
+    return Math.max(lastSeenAt[path] || 0, readingProgress[path]?.updatedAt || 0) || undefined;
+  }
+
+  function markSeen(path: string, at = Date.now()) {
+    const entries = Object.entries({ ...lastSeenAt, [path]: at });
+    // Keep the store small: only the most recently seen notes matter for change badges.
+    lastSeenAt = Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, LAST_SEEN_LIMIT));
+  }
+
+  function markRecentChangesSeen() {
+    const now = Date.now();
+    const entries = Object.entries(lastSeenAt);
+    for (const change of recentChanges) entries.push([change.file_path, now]);
+    lastSeenAt = Object.fromEntries(entries.sort((a, b) => b[1] - a[1]).slice(0, LAST_SEEN_LIMIT));
+    syncStore();
+  }
+
   function formatLastRead(path: string) {
-    const updatedAt = readingProgress[path]?.updatedAt;
-    if (!updatedAt) return '';
-    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - updatedAt) / 60000));
+    return formatRelativeTime(readingProgress[path]?.updatedAt);
+  }
+
+  function formatRelativeTime(timestamp?: number) {
+    if (!timestamp) return '';
+    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
     if (elapsedMinutes < 1) return t('workspace.just_now');
     if (elapsedMinutes < 60) return `${elapsedMinutes}${t('workspace.minutes_ago')}`;
     if (elapsedMinutes < 1440) return `${Math.floor(elapsedMinutes / 60)}${t('workspace.hours_ago')}`;
-    return `${Math.floor(elapsedMinutes / 1440)}${t('workspace.days_ago')}`;
+    const days = Math.floor(elapsedMinutes / 1440);
+    return `${days}${t(days === 1 ? 'workspace.day_ago' : 'workspace.days_ago')}`;
   }
 
   function openWorkspaceHome(fromHistory = false) {
@@ -1544,6 +1626,7 @@
     }
     folderPath = '';
     standaloneFilePath = '';
+    recentChanges = [];
     echoRequestId += 1;
     knowledgeEchoes = [];
     knowledgeEchoLoading = false;
@@ -1875,6 +1958,33 @@
             <button class="workspace-sources__add" onclick={addLinkedFolder}>＋ {t('workspace.add_source')}</button>
           </div>
           <div class="workspace-grid">
+            {#if recentChangeItems.length}
+            <section class="workspace-card workspace-card--changes" aria-labelledby="recent-changes-title">
+              <div class="changes__heading">
+                <div class="workspace-card__heading"><span>↻</span><h3 id="recent-changes-title">{t('changes.title')}</h3></div>
+                <span class="changes__summary">
+                  {#if recentNewCount || recentUpdatedCount}
+                    {[recentNewCount ? `${recentNewCount} ${t('changes.new_count')}` : '', recentUpdatedCount ? `${recentUpdatedCount} ${t('changes.updated_count')}` : ''].filter(Boolean).join(' · ')}
+                  {:else}
+                    {t('changes.all_read')}
+                  {/if}
+                  · {t('changes.window')}
+                </span>
+                {#if recentNewCount || recentUpdatedCount}
+                  <button class="changes__mark-read" onclick={markRecentChangesSeen}>{t('changes.mark_read')}</button>
+                {/if}
+              </div>
+              <div class="document-list changes-list">
+                {#each recentChangeItems as change (change.file_path)}
+                  <button class="changes-list__item changes-list__item--{change.status}" onclick={() => openSpecificFile(change.file_path)}>
+                    <span class="changes-list__status">{t(`changes.${change.status}`)}</span>
+                    <span class="changes-list__name">{change.file_name.replace(/\.(md|markdown|mdx)$/i, '')}</span>
+                    <small>{documentLocation(change.file_path, sourcePaths)} · {formatRelativeTime(change.modified_at)}</small>
+                  </button>
+                {/each}
+              </div>
+            </section>
+            {/if}
             <section class="workspace-card workspace-card--daily-echo">
               <div class="daily-echo__heading">
                 <div>
@@ -2123,7 +2233,7 @@
     <p class="settings-section__title">{t('settings.interface')}</p>
     <div class="setting-row">
        <label for="settings-language">{t('settings.sys_language')}</label>
-       <select id="settings-language" bind:value={i18nState.locale} onchange={syncStore}>
+       <select id="settings-language" bind:value={i18nState.locale} onchange={() => { localeChosen = true; syncStore(); }}>
          <option value="zh">中文</option>
          <option value="en">English</option>
        </select>
@@ -2560,6 +2670,18 @@
   .workspace-card--continue .document-list button { padding: 11px 9px; }
   .workspace-card--continue .document-list button span { font-size: 13px; }
   .workspace-card--recent { background: color-mix(in srgb, var(--color-bg) 34%, transparent); }
+  .workspace-card--changes { grid-column: span 2; min-height: 0; }
+  .changes__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .changes__summary { color: var(--color-text-gray); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .changes__mark-read { margin-left: auto; padding: 4px 11px; border: 1px solid var(--color-border); border-radius: 99px; color: var(--color-text-secondary); background: transparent; font-size: 11px; cursor: pointer; transition: color .18s ease, border-color .18s ease; }
+  .changes__mark-read:hover { border-color: var(--color-primary); color: var(--color-primary); }
+  .document-list.changes-list { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 8px; }
+  .document-list.changes-list button { grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; }
+  .document-list.changes-list .changes-list__status { grid-row: span 2; width: 58px; box-sizing: border-box; padding: 3px 6px; border-radius: 99px; color: var(--color-text-gray); background: color-mix(in srgb, var(--color-border) 45%, transparent); font-size: 10px; font-weight: 650; text-align: center; }
+  .document-list.changes-list small { grid-column: 2; }
+  .changes-list__item--new .changes-list__status { color: var(--color-primary) !important; background: var(--color-primary-alpha-10) !important; }
+  .changes-list__item--updated .changes-list__status { color: var(--color-important) !important; background: var(--color-important-alpha-10) !important; }
+  .changes-list__item--read .changes-list__name { color: var(--color-text-secondary); font-weight: 500 !important; }
   .workspace-card__heading { display: flex; align-items: center; gap: 8px; color: var(--color-primary); }
   .workspace-card__heading h3 { margin: 0; color: var(--color-text-primary); font-size: 14px; }
   .workspace-card__empty { max-width: 230px; margin: 28px 0 0; color: var(--color-text-gray); font-size: 12px; line-height: 1.6; }
@@ -2691,7 +2813,7 @@
   @keyframes surfaceArrive { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   @container reading-area (max-width: 620px) {
     .workspace-grid { grid-template-columns: minmax(0, 1fr); }
-    .workspace-card--continue, .workspace-card--daily-echo { grid-column: span 1; }
+    .workspace-card--continue, .workspace-card--daily-echo, .workspace-card--changes { grid-column: span 1; }
     .daily-echo { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .daily-echo__actions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
     .daily-echo__open { width: 100%; }

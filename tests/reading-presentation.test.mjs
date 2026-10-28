@@ -39,3 +39,15 @@ test('context uses the most specific source and handles Windows paths', () => {
   assert.equal(documentContext('C:\\Notes\\topic\\note.md', ['C:\\Notes']), 'Notes / topic/note.md');
   assert.equal(documentContext('/linked/single.md', ['/linked/single.md']), 'linked / single.md');
 });
+
+test('recent changes are new until opened, then updated when edited again', async () => {
+  const { changeStatus, documentLocation } = await import('../src/lib/reading-presentation.ts');
+  assert.equal(changeStatus(100, undefined), 'new');
+  assert.equal(changeStatus(100, 0), 'new');
+  assert.equal(changeStatus(100, 50), 'updated');
+  assert.equal(changeStatus(100, 100), 'read');
+  assert.equal(changeStatus(100, 150), 'read');
+  assert.equal(documentLocation('/kb/notes/ai/plan.md', ['/kb']), 'kb / notes/ai');
+  assert.equal(documentLocation('/kb/plan.md', ['/kb']), 'kb');
+  assert.equal(documentLocation('C:\\agents\\out\\report.md', ['C:\\agents']), 'agents / out');
+});

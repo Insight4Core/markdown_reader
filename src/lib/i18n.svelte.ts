@@ -1,3 +1,5 @@
+import { languageForLocale, type AppLocale } from './locale';
+
 export const translations: Record<string, Record<string, string>> = {
   zh: {
     'daily_echo.read': '今天已读',
@@ -31,6 +33,15 @@ export const translations: Record<string, Record<string, string>> = {
     'welcome.new_prompt': '还没有整理好的文件夹？',
     'workspace.eyebrow': '你的本地知识空间',
     'workspace.documents': '篇文档',
+    'changes.title': '最近变化',
+    'changes.window': '过去 7 天',
+    'changes.new': '新',
+    'changes.updated': '有更新',
+    'changes.read': '已读',
+    'changes.new_count': '篇新内容',
+    'changes.updated_count': '篇有更新',
+    'changes.all_read': '都已读过',
+    'changes.mark_read': '全部标为已读',
     'workspace.recent': '最近打开',
     'workspace.continue': '其他未读完的文章',
     'workspace.pinned': '固定内容',
@@ -42,6 +53,7 @@ export const translations: Record<string, Record<string, string>> = {
     'workspace.minutes_ago': ' 分钟前',
     'workspace.hours_ago': ' 小时前',
     'workspace.days_ago': ' 天前',
+    'workspace.day_ago': ' 天前',
     'rediscovery.title': '重新发现',
     'rediscovery.subtitle': '从你的知识库里，重新遇见几篇值得阅读的内容。推荐只在本地计算。',
     'rediscovery.local': '仅在本地',
@@ -236,6 +248,15 @@ export const translations: Record<string, Record<string, string>> = {
     'welcome.new_prompt': 'No folder ready yet?',
     'workspace.eyebrow': 'YOUR LOCAL KNOWLEDGE SPACE',
     'workspace.documents': 'documents',
+    'changes.title': 'Recent changes',
+    'changes.window': 'past 7 days',
+    'changes.new': 'New',
+    'changes.updated': 'Updated',
+    'changes.read': 'Read',
+    'changes.new_count': 'new',
+    'changes.updated_count': 'updated',
+    'changes.all_read': 'All caught up',
+    'changes.mark_read': 'Mark all as read',
     'workspace.recent': 'Recently opened',
     'workspace.continue': 'More unfinished notes',
     'workspace.pinned': 'Pinned',
@@ -247,6 +268,7 @@ export const translations: Record<string, Record<string, string>> = {
     'workspace.minutes_ago': ' min ago',
     'workspace.hours_ago': ' hr ago',
     'workspace.days_ago': ' days ago',
+    'workspace.day_ago': ' day ago',
     'rediscovery.title': 'Rediscover',
     'rediscovery.subtitle': 'Meet a few notes from your knowledge base again. Suggestions are calculated entirely on your device.',
     'rediscovery.local': 'ON-DEVICE',
@@ -412,18 +434,20 @@ export const translations: Record<string, Record<string, string>> = {
 };
 
 export const i18nState = $state({
-  locale: 'zh'
+  locale: detectSystemLanguage() as string
 });
 
 export function t(key: string): string {
-  const dict = translations[i18nState.locale] || translations['zh'];
+  const dict = translations[i18nState.locale] || translations['en'];
   return dict[key] || key;
 }
 
-export function detectSystemLanguage() {
-  if (typeof navigator === 'undefined') return 'zh';
-  const lang = navigator.language.toLowerCase();
-  if (lang.startsWith('en')) return 'en';
-  // Default to zh for zh-CN, zh-TW, etc. or fallback
-  return 'zh';
+export function systemLanguageTag(): string | undefined {
+  if (typeof navigator === 'undefined') return undefined;
+  // navigator.languages lists the user's preferred languages in order; fall back to the UI language.
+  return navigator.languages?.[0] || navigator.language;
+}
+
+export function detectSystemLanguage(): AppLocale {
+  return languageForLocale(systemLanguageTag());
 }

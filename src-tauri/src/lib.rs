@@ -30,6 +30,14 @@ pub struct KnowledgeEcho {
     score: f64,
 }
 
+#[derive(Serialize)]
+pub struct RecentChange {
+    file_path: String,
+    file_name: String,
+    /// Last modification time in milliseconds since the Unix epoch.
+    modified_at: u64,
+}
+
 #[derive(Clone)]
 struct AnalysedDocument {
     path: PathBuf,
@@ -520,6 +528,52 @@ async fn find_knowledge_echoes(
     Ok(rank_knowledge_echoes(&documents, &current, limit))
 }
 
+fn unix_millis(time: SystemTime) -> Option<u64> {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis() as u64)
+}
+
+/// Newest first; files changed before `since_ms` are left out.
+fn recent_changes_for_files(files: &[PathBuf], since_ms: u64, limit: usize) -> Vec<RecentChange> {
+    let mut changes: Vec<RecentChange> = files
+        .par_iter()
+        .filter_map(|path| {
+            let modified_at = unix_millis(fs::metadata(path).ok()?.modified().ok()?)?;
+            if modified_at < since_ms {
+                return None;
+            }
+            Some(RecentChange {
+                file_path: path.to_string_lossy().to_string(),
+                file_name: path.file_name()?.to_string_lossy().to_string(),
+                modified_at,
+            })
+        })
+        .collect();
+    changes.sort_by(|a, b| {
+        b.modified_at
+            .cmp(&a.modified_at)
+            .then_with(|| a.file_path.cmp(&b.file_path))
+    });
+    changes.truncate(limit.clamp(1, 50));
+    changes
+}
+
+#[tauri::command]
+async fn recent_markdown_changes(
+    root_paths: Vec<String>,
+    since_ms: u64,
+    limit: usize,
+) -> Result<Vec<RecentChange>, String> {
+    // Walking the folders is blocking I/O; keep it off the async runtime.
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = markdown_files_for_roots(&root_paths);
+        recent_changes_for_files(&files, since_ms, limit)
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn search_content(
     root_paths: Vec<String>,
@@ -631,7 +685,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             search_content,
-            find_knowledge_echoes
+            find_knowledge_echoes,
+            recent_markdown_changes
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -697,6 +752,40 @@ mod tests {
         let excerpt = best_snippet(content, &["memory".to_string()]);
         assert!(excerpt.starts_with("A saved memory"));
         assert!(!excerpt.contains("memory.py"));
+    }
+
+    #[test]
+    fn recent_changes_are_newest_first_and_skip_old_files() {
+        let root = std::env::temp_dir().join(format!(
+            "pyrus-recent-changes-{}-{}",
+            std::process::id(),
+            unix_millis(SystemTime::now()).unwrap()
+        ));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        let base = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        let write = |name: &str, seconds: u64| {
+            let path = root.join(name);
+            fs::write(&path, "# note").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(base + std::time::Duration::from_secs(seconds))
+                .unwrap();
+        };
+        write("old.md", 0);
+        write("middle.md", 100);
+        write("nested/newest.md", 200);
+        write("ignored.txt", 300);
+
+        let since = unix_millis(base + std::time::Duration::from_secs(50)).unwrap();
+        let files = markdown_files_for_roots(&[root.to_string_lossy().to_string()]);
+        let changes = recent_changes_for_files(&files, since, 8);
+        let names: Vec<&str> = changes.iter().map(|change| change.file_name.as_str()).collect();
+        assert_eq!(names, vec!["newest.md", "middle.md"]);
+        assert_eq!(recent_changes_for_files(&files, since, 1).len(), 1);
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn analysed(path: &str, content: &str) -> AnalysedDocument {
