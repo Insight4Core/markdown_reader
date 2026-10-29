@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Open and read .md files on Windows with Notepad, VS Code, an online viewer, or a local Markdown reader. Includes steps for setting the default app." />
+    <meta name="description" content="Open .md files on Windows with Notepad, VS Code, or a local reader. Includes a sample file, default-app steps, and offline Markdown-to-PDF export." />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Pyrus" />
@@ -18,7 +18,7 @@
     <link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
     <title>How to Open .MD Files on Windows — 4 Easy Ways</title>
     <script type="application/ld+json">
-      {"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to Open .MD Files on Windows — 4 Easy Ways","description":"Open and read .md files on Windows with Notepad, VS Code, an online viewer, or a local Markdown reader.","datePublished":"2026-10-11","dateModified":"2026-10-23","author":{"@type":"Organization","name":"Insight4Core"},"publisher":{"@type":"Organization","name":"Pyrus"},"mainEntityOfPage":"https://insight4core.github.io/markdown_reader/en/open-md-file-windows/","inLanguage":"en"},{"@type":"HowTo","name":"How to open .md files on Windows in a rendered reading view","step":[{"@type":"HowToStep","name":"Install a Markdown reader","text":"Download and install a local Markdown reader such as Pyrus."},{"@type":"HowToStep","name":"Open the file","text":"Open Pyrus and choose Open Markdown file, or drag the .md file onto the app window."},{"@type":"HowToStep","name":"Make it the default if desired","text":"Right-click a .md file, choose Open with, select the reader, and enable Always use this app."}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What program opens .md files on Windows?","acceptedAnswer":{"@type":"Answer","text":"Notepad and code editors can open the plain text. A Markdown-capable editor or reader is needed to display headings, links, tables, code blocks, and images as a formatted document."}},{"@type":"Question","name":"Can I open a .md file without uploading it?","acceptedAnswer":{"@type":"Answer","text":"Yes. Notepad, VS Code, and local Markdown readers open files directly from your computer without requiring an upload."}},{"@type":"Question","name":"How do I make a Markdown reader the default for .md files?","acceptedAnswer":{"@type":"Answer","text":"Right-click a .md file, select Open with, choose another app, select your Markdown reader, and enable Always use this app to open .md files."}}]}]}
+      {"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to Open .MD Files on Windows — 4 Easy Ways","description":"Open and read .md files on Windows with Notepad, VS Code, an online viewer, or a local Markdown reader.","datePublished":"2026-10-11","dateModified":"2026-10-29","author":{"@type":"Organization","name":"Insight4Core"},"publisher":{"@type":"Organization","name":"Pyrus"},"mainEntityOfPage":"https://insight4core.github.io/markdown_reader/en/open-md-file-windows/","inLanguage":"en"},{"@type":"HowTo","name":"How to open .md files on Windows in a rendered reading view","step":[{"@type":"HowToStep","name":"Install a Markdown reader","text":"Download and install a local Markdown reader such as Pyrus."},{"@type":"HowToStep","name":"Open the file","text":"Open Pyrus and choose Open Markdown file, or drag the .md file onto the app window."},{"@type":"HowToStep","name":"Make it the default if desired","text":"Right-click a .md file, choose Open with, select the reader, and enable Always use this app."}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What program opens .md files on Windows?","acceptedAnswer":{"@type":"Answer","text":"Notepad and code editors can open the plain text. A Markdown-capable editor or reader is needed to display headings, links, tables, code blocks, and images as a formatted document."}},{"@type":"Question","name":"Can I open a .md file without uploading it?","acceptedAnswer":{"@type":"Answer","text":"Yes. Notepad, VS Code, and local Markdown readers open files directly from your computer without requiring an upload."}},{"@type":"Question","name":"How do I make a Markdown reader the default for .md files?","acceptedAnswer":{"@type":"Answer","text":"Right-click a .md file, select Open with, choose another app, select your Markdown reader, and enable Always use this app to open .md files."}},{"@type":"Question","name":"Can I convert a .md file to PDF without uploading it?","acceptedAnswer":{"@type":"Answer","text":"Yes. Open it in Pyrus 0.10.0 or later, choose Export → Export PDF / Print, and use a PDF printer in the Windows print dialog. This creates a separate PDF without changing the original Markdown file."}}]}]}
     </script>
   </head>
   <body>
@@ -31,7 +31,7 @@
         <p class="eyebrow">WINDOWS MARKDOWN GUIDE</p>
         <h1>How to open .md files on Windows: 4 easy ways</h1>
         <p class="lead">Windows can open Markdown as plain text, but it will not always show the formatted document you expected. These four methods work on Windows 10 and 11, whether you want to inspect, edit, or simply read the file.</p>
-        <div class="article-meta"><span>7 minute read</span><span>·</span><time datetime="2026-10-23">Updated October 23, 2026</time></div>
+        <div class="article-meta"><span>9 minute read</span><span>·</span><time datetime="2026-10-29">Updated October 29, 2026</time></div>
       </header>
 
       <div class="article-layout">
@@ -105,6 +105,22 @@ This is an ordinary `.md` file. Open it in a text editor to see the source, or i
           <details class="example-more"><summary>See the table and code block from the same file</summary><figure class="article-figure"><img src="../../screenshots/reading-demo-code-current-en.jpg" width="1000" height="700" alt="Further down the same example in Pyrus: a three-row table and a JavaScript code block" loading="lazy" /><figcaption>Scrolled further down the same file in Pyrus on macOS. No imported library or account was needed to open the document.</figcaption></figure></details>
           <p>Pyrus also remembers reading progress, provides a live outline for long documents, supports local images, and lets a useful standalone note be linked into a knowledge base later without moving the source file.</p>
 
+          <h2 id="export-pdf">How to export Markdown to PDF on Windows</h2>
+          <p>In Pyrus 0.10.0, the reading view also gives you a local route from <code>.md</code> to PDF. No upload to a conversion website is required.</p>
+          <ol>
+            <li>Open the Markdown file in Pyrus. You can use the <a class="inline-link" href="../../examples/reading-demo.md" download="reading-demo.md">example file above</a>.</li>
+            <li>Open <strong>Export</strong> in the reading toolbar and choose <strong>Export PDF / Print…</strong>, or press <strong>Ctrl+P</strong>.</li>
+            <li>In the system print dialog, select a PDF printer such as <strong>Microsoft Print to PDF</strong>, if available.</li>
+            <li>Check the preview, select <strong>Print</strong>, then choose the PDF filename and location.</li>
+          </ol>
+          <p>The PDF uses a white page rather than your app theme. Wait for local images and diagrams to finish loading, and check the page breaks before saving. This exports the current document, not an entire folder. The original Markdown file stays unchanged.</p>
+          <p>If the PDF printer is missing, that is a Windows printing configuration issue rather than a Markdown format issue. You can still use the other export options below.</p>
+
+          <h3 id="copy-rich-text">Copy formatted Markdown into email or a document</h3>
+          <p>Choose <strong>Export → Copy as rich text</strong>, then paste into an app that accepts formatted content. Choose <strong>Copy Markdown</strong> when you want the original source for a text editor or an AI chat instead.</p>
+          <p>Paste results depend on the destination app. Math is copied as TeX source, and images or diagrams may be handled differently, so check the pasted result before sharing it.</p>
+          <p>Reading several sources? <a class="inline-link" href="../markdown-folder-knowledge-base/#reading-tabs">Open them in separate tabs</a> and keep your place in each note.</p>
+
           <h2 id="default-app">Make Pyrus—or another reader—the default .md app</h2>
           <ol>
             <li>Right-click any <code>.md</code> file and select <strong>Open with</strong>.</li>
@@ -124,6 +140,7 @@ This is an ordinary `.md` file. Open it in a text editor to see the source, or i
             <details><summary>Can Microsoft Word open a Markdown file?</summary><p>Word can open the text, but it is not a native Markdown reader and usually will not interpret every Markdown element as intended. Converting the file also risks changing the format.</p></details>
             <details><summary>Can I read Markdown without uploading it?</summary><p>Yes. Notepad, VS Code, and local readers work directly with files on your computer. No account or cloud service is required.</p></details>
             <details><summary>Why are images missing from my Markdown file?</summary><p>Markdown often points to images using relative paths. Keep the image folder in the same relative location as the note, and use a reader that resolves images relative to the original file.</p></details>
+            <details><summary>Can I convert a .md file to PDF without uploading it?</summary><p>Yes. Open it in Pyrus 0.10.0 or later, choose Export → Export PDF / Print, and use a PDF printer in the Windows print dialog. This creates a separate PDF without changing the original Markdown file.</p></details>
             <details><summary>Are .md files safe?</summary><p>A Markdown file is plain text, but links and embedded HTML can still point elsewhere. Treat files from unknown sources with the same care as any downloaded document.</p></details>
           </div>
 
@@ -135,7 +152,7 @@ This is an ordinary `.md` file. Open it in a text editor to see the source, or i
         </article>
         <aside class="article-aside">
           <p>IN THIS GUIDE</p>
-          <a href="#quick-answer">The short answer</a><a href="#try-example">Try an example file</a><a href="#notepad">Use Notepad</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-mac/">Open .md on macOS →</a>
+          <a href="#quick-answer">The short answer</a><a href="#try-example">Try an example file</a><a href="#notepad">Use Notepad</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#export-pdf">Export Markdown to PDF</a><a href="#copy-rich-text">Copy formatted content</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-mac/">Open .md on macOS →</a>
         </aside>
       </div>
     </main>

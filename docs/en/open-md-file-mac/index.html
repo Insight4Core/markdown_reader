@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Learn how to open and read .md files on a Mac using TextEdit, VS Code, Quick Look, or a local Markdown reader—and choose the right default app." />
+    <meta name="description" content="Open .md files on Mac with TextEdit, Quick Look, VS Code, or a local reader. Set the default app and export Markdown to PDF without uploading it." />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta property="og:type" content="article" />
     <meta property="og:site_name" content="Pyrus" />
@@ -18,7 +18,7 @@
     <link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
     <title>How to Open a .md File on Mac Without Raw Markdown — Pyrus</title>
     <script type="application/ld+json">
-      {"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to open a .md file on Mac without reading raw Markdown","description":"Practical ways to open and read Markdown files on macOS with TextEdit, VS Code, Quick Look, or a dedicated local reader.","datePublished":"2026-10-11","dateModified":"2026-10-11","author":{"@type":"Organization","name":"Insight4Core"},"publisher":{"@type":"Organization","name":"Pyrus"},"mainEntityOfPage":"https://insight4core.github.io/markdown_reader/en/open-md-file-mac/","inLanguage":"en"},{"@type":"HowTo","name":"How to open a .md file on Mac in a rendered reading view","step":[{"@type":"HowToStep","name":"Install a Markdown reader","text":"Download and install a local Markdown reader such as Pyrus."},{"@type":"HowToStep","name":"Open the file","text":"Open Pyrus and choose Open Markdown file, or drag the .md file onto the app window."},{"@type":"HowToStep","name":"Make it the default if desired","text":"Select a .md file in Finder, open Get Info, choose the reader under Open with, and select Change All."}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What app opens .md files on a Mac?","acceptedAnswer":{"@type":"Answer","text":"TextEdit and code editors can open the plain text. A Markdown-capable editor or reader is needed to display headings, links, tables, code blocks, and images as a formatted document."}},{"@type":"Question","name":"Can I preview a .md file with Quick Look?","acceptedAnswer":{"@type":"Answer","text":"Finder can preview the text, but fully rendered Markdown depends on the macOS version and installed Quick Look extensions. A dedicated reader gives a more consistent result."}},{"@type":"Question","name":"How do I make a Markdown reader the default on macOS?","acceptedAnswer":{"@type":"Answer","text":"Select a .md file in Finder, press Command-I, choose the reader under Open with, and click Change All."}}]}]}
+      {"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"How to open a .md file on Mac without reading raw Markdown","description":"Practical ways to open and read Markdown files on macOS with TextEdit, VS Code, Quick Look, or a dedicated local reader.","datePublished":"2026-10-11","dateModified":"2026-10-29","author":{"@type":"Organization","name":"Insight4Core"},"publisher":{"@type":"Organization","name":"Pyrus"},"mainEntityOfPage":"https://insight4core.github.io/markdown_reader/en/open-md-file-mac/","inLanguage":"en"},{"@type":"HowTo","name":"How to open a .md file on Mac in a rendered reading view","step":[{"@type":"HowToStep","name":"Install a Markdown reader","text":"Download and install a local Markdown reader such as Pyrus."},{"@type":"HowToStep","name":"Open the file","text":"Open Pyrus and choose Open Markdown file, or drag the .md file onto the app window."},{"@type":"HowToStep","name":"Make it the default if desired","text":"Select a .md file in Finder, open Get Info, choose the reader under Open with, and select Change All."}]},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What app opens .md files on a Mac?","acceptedAnswer":{"@type":"Answer","text":"TextEdit and code editors can open the plain text. A Markdown-capable editor or reader is needed to display headings, links, tables, code blocks, and images as a formatted document."}},{"@type":"Question","name":"Can I preview a .md file with Quick Look?","acceptedAnswer":{"@type":"Answer","text":"Finder can preview the text, but fully rendered Markdown depends on the macOS version and installed Quick Look extensions. A dedicated reader gives a more consistent result."}},{"@type":"Question","name":"How do I make a Markdown reader the default on macOS?","acceptedAnswer":{"@type":"Answer","text":"Select a .md file in Finder, press Command-I, choose the reader under Open with, and click Change All."}},{"@type":"Question","name":"Can I export Markdown to PDF locally on Mac?","acceptedAnswer":{"@type":"Answer","text":"Yes. In Pyrus 0.10.0 or later, choose Export → Export PDF / Print, then choose Save as PDF in the macOS print dialog. No online conversion service is needed."}}]}]}
     </script>
   </head>
   <body>
@@ -31,7 +31,7 @@
         <p class="eyebrow">MAC MARKDOWN GUIDE</p>
         <h1>How to open a .md file on Mac without reading raw Markdown</h1>
         <p class="lead">Double-clicking a Markdown file often gives you a wall of <code>#</code>, <code>**</code>, and backticks. The file is not broken—macOS has simply opened the source instead of a rendered reading view.</p>
-        <div class="article-meta"><span>7 minute read</span><span>·</span><time datetime="2026-10-11">Updated October 11, 2026</time></div>
+        <div class="article-meta"><span>9 minute read</span><span>·</span><time datetime="2026-10-29">Updated October 29, 2026</time></div>
       </header>
 
       <div class="article-layout">
@@ -80,6 +80,21 @@
           <figure class="article-figure"><img src="../../screenshots/welcome-current-en.png" alt="Pyrus welcome screen offering an Open Markdown file action" loading="lazy" /><figcaption>A single note can stay a single note. Build a knowledge base only when the file becomes part of something larger.</figcaption></figure>
           <p>For longer documents, Pyrus adds an outline and remembers where you stopped. If the note later becomes important, you can link it into an existing knowledge base while leaving the original in its folder.</p>
 
+          <h2 id="export-pdf">How to export Markdown to PDF on Mac</h2>
+          <p>Pyrus 0.10.0 can print the formatted document through the macOS print dialog. Use this when you want to send a readable PDF without uploading your Markdown to an online converter.</p>
+          <ol>
+            <li>Open your <code>.md</code> file in Pyrus, or try this <a class="inline-link" href="../../examples/reading-demo.md" download="reading-demo.md">small Markdown example</a>.</li>
+            <li>Choose <strong>Export → Export PDF / Print…</strong>, or press <strong>Command+P</strong>.</li>
+            <li>In the system print dialog, open the <strong>PDF</strong> menu and choose <strong>Save as PDF</strong>.</li>
+            <li>Check the preview, give the PDF a name, choose its location, and save.</li>
+          </ol>
+          <p>The export uses white paper, even when your reading theme is dark. Check that images and diagrams have finished loading, and review page breaks before saving. The current note is exported; the original Markdown is not replaced.</p>
+          <p>Apple documents the system dialog in its <a class="inline-link" href="https://support.apple.com/en-gb/guide/mac-help/mchlp1531/mac">Save a document as a PDF guide</a>.</p>
+
+          <h3 id="copy-rich-text">Paste the reading view into an email or document</h3>
+          <p>Choose <strong>Export → Copy as rich text</strong> for an app that accepts formatted text, or <strong>Copy Markdown</strong> for the original source. Formatting support varies by destination; math is copied as TeX source, so inspect the pasted result before sending it.</p>
+          <p>If you are comparing several notes, <a class="inline-link" href="../markdown-folder-knowledge-base/#reading-tabs">open them in separate reading tabs</a> instead of repeatedly leaving the current file.</p>
+
           <h2 id="default-app">Make a Markdown reader the default on macOS</h2>
           <ol>
             <li>Select any <code>.md</code> file in Finder.</li>
@@ -99,6 +114,7 @@
             <details><summary>Can I preview Markdown with the Space bar?</summary><p>Quick Look can preview the file, but the level of Markdown rendering depends on macOS and any Quick Look extensions you have installed.</p></details>
             <details><summary>Why do local images disappear?</summary><p>Images are often referenced using paths relative to the Markdown file. Keep the note and its image folder in their original relative positions, and choose a reader that resolves assets from the source file location.</p></details>
             <details><summary>Will changing the default app modify my file?</summary><p>No. Changing the default app only changes which application opens the file when you double-click it. The Markdown content and location remain unchanged.</p></details>
+            <details><summary>Can I export Markdown to PDF locally on Mac?</summary><p>Yes. In Pyrus 0.10.0 or later, choose Export → Export PDF / Print, then choose Save as PDF in the macOS print dialog. No online conversion service is needed.</p></details>
           </div>
 
           <section class="article-cta">
@@ -109,7 +125,7 @@
         </article>
         <aside class="article-aside">
           <p>IN THIS GUIDE</p>
-          <a href="#quick-answer">The short answer</a><a href="#textedit">Use TextEdit</a><a href="#quick-look">Use Quick Look</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-windows/">Open .md on Windows →</a>
+          <a href="#quick-answer">The short answer</a><a href="#textedit">Use TextEdit</a><a href="#quick-look">Use Quick Look</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#export-pdf">Export Markdown to PDF</a><a href="#copy-rich-text">Copy formatted content</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-windows/">Open .md on Windows →</a>
         </aside>
       </div>
     </main>

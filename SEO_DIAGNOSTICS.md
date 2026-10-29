@@ -1,5 +1,25 @@
 # Search Console sitemap investigation — 2026-10-23
 
+## Follow-up — 2026-10-29
+
+- Public sitemap GET still returns **HTTP 200**, `application/xml`; the deployed XML remains well-formed. The host-root robots.txt still returns 404. These public checks do **not** confirm that Search Console's sitemap report has recovered.
+- No authenticated Search Console or GA4 access was available in this session. Current queries, impressions, ranking, CTR, and download-link conversion were **not** read. Do not infer an indexing failure from an empty `site:` search or claim a traffic improvement from the changes below.
+- GitHub's latest published release was verified as **v0.10.0**. Both homepages now describe Recent changes, reading tabs, and the three export actions; SoftwareApplication metadata no longer advertises 0.8.3.
+- Existing Windows and Mac guides retain their URLs and titles. Their new sections answer Markdown-to-PDF and formatted-copy questions. The bilingual folder guide explains changed-note states, actual tab shortcuts, and export limitations. Homepage links point directly to those sections.
+- Only the six substantively updated pages receive a 2026-10-29 sitemap `lastmod`. No new sitemap filename, duplicate keyword pages, or speculative indexing fix was introduced.
+
+### After deploying this update
+
+1. Check the two homepages, the Windows/Mac PDF sections, and the two folder guides on the live Pages site. The localhost preview is not production.
+2. Inspect the four updated guide URLs in Search Console and optionally request a recrawl once per URL. Do not repeatedly resubmit the same sitemap to compensate for unknown traffic performance.
+3. Review the sitemap report separately. Its success condition remains **Success** and discovered page URLs; a normal public HTTP response is not enough to mark the issue fixed.
+4. Save Search Console's latest 28-day **Queries** and **Pages** exports. Compare the existing open-.md query group with any emerging Markdown/PDF queries after Google recrawls. PDF-related demand is a content hypothesis, not a measured keyword-volume claim.
+5. Review consenting sessions with `download_click` by landing page and language in GA4. The event measures a click to the GitHub release page, not a completed binary download or active app user. Low-count fluctuations should not trigger another title change.
+
+The existing analytics implementation and consent behavior are unchanged; no app telemetry SDK was added.
+
+---
+
 Property: `https://insight4core.github.io/markdown_reader/`
 
 Sitemap: `https://insight4core.github.io/markdown_reader/sitemap.xml`
