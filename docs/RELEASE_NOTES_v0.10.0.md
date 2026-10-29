@@ -1,10 +1,10 @@
-# 知返 0.9.0 / Pyrus 0.9.0
+# 知返 0.10.0 / Pyrus 0.10.0
 
 **发布日期 / Released:** 2026-10-28
 
 ## 简体中文
 
-知返 0.9.0 让 AI 写出来的 Markdown 更好读、更好用：一眼看到刚刚新增或改动了什么，同时打开几篇来回对照，读完一键导出或分享。
+知返 0.10.0 让 AI 写出来的 Markdown 更好读、更好用：一眼看到刚刚新增或改动了什么，同时打开几篇来回对照，读完一键导出或分享。
 
 ### 新功能
 
@@ -22,7 +22,7 @@
 
 ## English
 
-Pyrus 0.9.0 makes Markdown written by AI easier to read and share: see what was just added or changed, keep several notes open and switch between them, and export when you are done.
+Pyrus 0.10.0 makes Markdown written by AI easier to read and share: see what was just added or changed, keep several notes open and switch between them, and export when you are done.
 
 ### What's new
 
@@ -38,4 +38,4 @@ Pyrus 0.9.0 makes Markdown written by AI easier to read and share: see what was 
 - Systems in languages other than Chinese now start in English; a language chosen in Settings is kept.
 - macOS: ⌘W closes the current tab; Close Window moved to ⇧⌘W.
 
-Download: [GitHub Releases](https://github.com/Insight4Core/markdown_reader/releases/tag/v0.9.0)
+Download: [GitHub Releases](https://github.com/Insight4Core/markdown_reader/releases/tag/v0.10.0)

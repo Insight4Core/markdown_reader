@@ -4,7 +4,7 @@
   <p><strong>一个让被遗忘的本地 Markdown 笔记重新回到你面前的阅读空间。</strong></p>
   <p><a href="./README.md">English</a> · <strong>简体中文</strong></p>
   <p><a href="https://insight4core.github.io/markdown_reader/zh-cn/">官方网站</a> · <a href="https://github.com/Insight4Core/markdown_reader/releases/latest">下载</a></p>
-  <p><a href="./docs/RELEASE_NOTES_v0.9.0.md">查看 0.9.0 更新说明</a></p>
+  <p><a href="./docs/RELEASE_NOTES_v0.10.0.md">查看 0.10.0 更新说明</a></p>
 </div>
 
 ## 早期体验版
