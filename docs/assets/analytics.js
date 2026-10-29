@@ -12,15 +12,23 @@ export function downloadDetails(anchor, pagePath) {
   } catch {
     return null;
   }
-  if (url.hostname !== 'github.com' ||
-      !/^\/Insight4Core\/markdown_reader\/releases\/latest\/?$/i.test(url.pathname)) return null;
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com') return null;
+  const releasePage = /^\/Insight4Core\/markdown_reader\/releases\/latest\/?$/i.test(url.pathname);
+  const installer = /^\/Insight4Core\/markdown_reader\/releases\/download\/[^/]+\/[^/]+\.(exe|msi|dmg|deb|rpm|AppImage)$/i.exec(url.pathname);
+  if (!releasePage && !installer) return null;
 
   const platform = pagePath.includes('/open-md-file-windows/') ? 'windows'
     : pagePath.includes('/open-md-file-mac/') ? 'macos' : 'all';
-  const placement = anchor.closest('.hero') ? 'hero'
+  const explicitLocation = anchor.getAttribute?.('data-download-location');
+  const placement = ['guide_start', 'reader_section', 'article_cta'].includes(explicitLocation) ? explicitLocation
+    : anchor.closest('.hero') ? 'hero'
     : anchor.closest('.closing') ? 'closing'
     : anchor.closest('.article-cta') ? 'article_cta' : 'article_inline';
-  return { target_platform: platform, button_location: placement };
+  return {
+    target_platform: platform, button_location: placement,
+    download_kind: installer ? 'installer' : 'release_page',
+    artifact_format: installer ? installer[1].toLowerCase() : 'none',
+  };
 }
 
 function readConsent() {

@@ -4,6 +4,7 @@
   "description": "Pyrus - Knowledge Base Platform",
   "type": "module",
   "scripts": {
+    "downloads": "node scripts/download-stats.mjs",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

@@ -27,24 +27,30 @@
       <nav class="nav-links" aria-label="Article navigation"><a href="#quick-answer">Quick answer</a><a href="#compare">Compare methods</a><a href="#faq">FAQ</a><a class="language-link" href="../open-md-file-mac/">macOS guide</a></nav>
     </header>
     <main class="shell">
-      <header class="article-hero">
-        <p class="eyebrow">WINDOWS MARKDOWN GUIDE</p>
+      <header class="article-hero article-hero--quick">
         <h1>How to open .md files on Windows: 4 easy ways</h1>
-        <p class="lead">Windows can open Markdown as plain text, but it will not always show the formatted document you expected. These four methods work on Windows 10 and 11, whether you want to inspect, edit, or simply read the file.</p>
+        <p class="lead">You do not need to convert a .md file to open it. Choose plain text for a quick check, a rendered view for comfortable reading, or set the app that opens it on double-click.</p>
         <div class="article-meta"><span>9 minute read</span><span>·</span><time datetime="2026-10-29">Updated October 29, 2026</time></div>
       </header>
 
       <div class="article-layout">
         <article class="prose">
           <section class="quick-answer" id="quick-answer">
-            <small>THE SHORT ANSWER</small>
-            <p>Right-click the <code>.md</code> file and choose <strong>Open with</strong>. Pick Notepad for a quick text check, or open it in VS Code and press <strong>Ctrl+Shift+V</strong> for a formatted preview. If you mainly want to read, use a local Markdown reader so the file opens as a document without leaving your computer.</p>
-            <ul class="answer-paths">
-              <li><strong>Quick check</strong><span>Notepad</span></li>
-              <li><strong>Write or edit</strong><span>VS Code preview</span></li>
-              <li><strong>No installation</strong><span>Online viewer</span></li>
-              <li><strong>Comfortable reading</strong><span>Local reader</span></li>
+            <h2 class="quick-answer__title">What do you want to do?</h2>
+            <ul class="answer-routes">
+              <li><a href="#notepad"><strong>Just read the words</strong><span>Right-click → Open with → Notepad. No installation needed.</span><span class="answer-routes__action">Use Notepad →</span></a></li>
+              <li><a href="#reader"><strong>See headings, tables, and code</strong><span>Open the file in a Markdown reader, with the original kept in place.</span><span class="answer-routes__action">See the reading view →</span></a></li>
+              <li><a href="#default-app"><strong>Make double-click open the right app</strong><span>Choose a default app for .md files in Windows.</span><span class="answer-routes__action">Set the default app →</span></a></li>
             </ul>
+            <p class="quick-answer__editor">Already use VS Code? Open the file and press <strong>Ctrl+Shift+V</strong>. <a class="inline-link" href="#vscode">Preview instructions</a>.</p>
+          </section>
+
+          <section class="windows-download" id="windows-download" aria-labelledby="windows-download-title">
+            <h2 id="windows-download-title">Want a reading app, not another editor?</h2>
+            <p>Pyrus is a free, open-source Markdown reader. Install it, then open or drop one file—no account or knowledge base setup required.</p>
+            <a class="button button--primary" data-pyrus-windows-installer data-download-location="guide_start" href="https://github.com/Insight4Core/markdown_reader/releases/download/v0.10.0/Pyrus_0.10.0_x64-setup.exe">Download Windows installer (.exe)</a>
+            <p class="download-spec"><span data-pyrus-release-version>v0.10.0</span> · Windows x64 (Intel / AMD) · <span data-pyrus-installer-name>Pyrus_0.10.0_x64-setup.exe</span></p>
+            <p class="download-alternative"><a class="inline-link" data-download-location="guide_start" href="https://github.com/Insight4Core/markdown_reader/releases/latest">Other installers, platforms &amp; release notes</a>. Prefer no new app? The Notepad and VS Code methods below still work.</p>
           </section>
 
           <h2 id="what-is-md">What is a .md file?</h2>
@@ -97,7 +103,7 @@ This is an ordinary `.md` file. Open it in a text editor to see the source, or i
           <h2 id="reader">Option 4: Open it in a dedicated Markdown reader</h2>
           <p>A dedicated reader is useful when the file is something to understand rather than edit: documentation, an exported AI conversation, a long technical note, a README, or an archive of saved articles.</p>
           <ol>
-            <li>Install <a class="inline-link" href="https://github.com/Insight4Core/markdown_reader/releases/latest">Pyrus for Windows</a>.</li>
+            <li><a class="inline-link" data-pyrus-windows-installer data-download-location="reader_section" href="https://github.com/Insight4Core/markdown_reader/releases/download/v0.10.0/Pyrus_0.10.0_x64-setup.exe">Download Pyrus for Windows x64 (.exe)</a> from the official GitHub release, then install it.</li>
             <li>Choose <strong>Open Markdown file</strong> on the welcome screen, or drag the file onto the window.</li>
             <li>Read the rendered document. The original stays in its existing folder and is not copied into a proprietary library.</li>
           </ol>
@@ -147,16 +153,18 @@ This is an ordinary `.md` file. Open it in a text editor to see the source, or i
           <section class="article-cta">
             <h2>Want the file to feel like a document?</h2>
             <p>Pyrus is a free, open-source Markdown reader for Windows, macOS, and Linux. Open one file without setup, keep it where it is, and turn a folder into a reading space only when you need one.</p>
-            <a class="button button--primary" href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download Pyrus for Windows — free</a>
+            <a class="button button--primary" data-pyrus-windows-installer data-download-location="article_cta" href="https://github.com/Insight4Core/markdown_reader/releases/download/v0.10.0/Pyrus_0.10.0_x64-setup.exe">Download Windows installer (.exe) — free</a>
+            <p class="download-alternative"><a class="inline-link" href="https://github.com/Insight4Core/markdown_reader/releases/latest">All downloads &amp; release notes on GitHub</a></p>
           </section>
         </article>
         <aside class="article-aside">
           <p>IN THIS GUIDE</p>
-          <a href="#quick-answer">The short answer</a><a href="#try-example">Try an example file</a><a href="#notepad">Use Notepad</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#export-pdf">Export Markdown to PDF</a><a href="#copy-rich-text">Copy formatted content</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-mac/">Open .md on macOS →</a>
+          <a href="#quick-answer">Choose a method</a><a href="#windows-download">Windows installer</a><a href="#try-example">Try an example file</a><a href="#notepad">Use Notepad</a><a href="#vscode">Use VS Code</a><a href="#reader">Use a Markdown reader</a><a href="#export-pdf">Export Markdown to PDF</a><a href="#copy-rich-text">Copy formatted content</a><a href="#default-app">Set the default app</a><a href="#compare">Compare methods</a><a href="#faq">Questions</a><a href="../open-md-file-mac/">Open .md on macOS →</a>
         </aside>
       </div>
     </main>
     <footer class="shell footer"><span>© <span data-year>2026</span> Insight4Core</span><span><a href="../markdown-folder-knowledge-base/">Read a Markdown folder</a> · <a href="../">Back to Pyrus</a></span></footer>
     <script src="../../assets/site.js" defer></script>
+    <script type="module" src="../../assets/release-downloads.js"></script>
   </body>
 </html>
