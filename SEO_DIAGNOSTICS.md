@@ -1,5 +1,26 @@
 # Search Console sitemap investigation — 2026-10-23
 
+## Follow-up — 2026-11-02
+
+- Authenticated Search Console access succeeded. Comparing the complete reporting weeks **2026-10-25–31** and **2026-10-18–24**: clicks **12 vs 6**, impressions approximately **890 vs 588**, CTR **1.3% vs 1.0%**, average position **5.6 vs 7.8**. The latest week's 12 clicks all belonged to the existing Windows guide. Small samples and different query mixes do not establish that the last website update caused this increase.
+- The sitemap record points to the correct, full `/markdown_reader/sitemap.xml` URL—not the host-root `/sitemap.xml`. Its detail report still says **Sitemap could not be read**, last read **2026-10-23**, with **0 discovered pages**. It provides no specific HTTP/parser cause.
+- A new **Google live URL inspection at 2026-11-02 09:11:20** (time shown in the report) passed: **crawl allowed Yes**, **page fetch Successful**, **indexing allowed Yes**, Google Inspection Tool smartphone. This confirms today's inspection-tool fetch, not recovery of the sitemap crawler's report. No sitemap filename churn, root-site creation, deletion, or repeated submission was performed.
+- Public checks found all 11 sitemap URLs returning HTTP 200 with matching canonical URLs and no HTML `noindex`. The deployed Windows guide, analytics module, installer-link module, and sitemap matched the local committed files before this update.
+- GA4's **2026-10-05–2026-11-01** event report was read: **4 page_view events / 2 users**, **1 download_click event / 1 user**. These may include earlier developer verification. They are not evidence of organic download conversion, nor do their denominators match Search Console clicks or GitHub download counters.
+- GitHub's installer counters at the time of the check were **154** (Windows 105, macOS 14, Linux 35), up **3** from the saved October 29 baseline. All three new installer counts belong to the v0.10.0 Windows `.exe`; updater payloads increased separately from 12 to 13. No installer binary was fetched by these checks.
+- This update moves a short source excerpt and the existing real reading screenshot before the Windows installer CTA, discloses that the screenshot was captured on macOS, and collapses the longer source excerpt. Existing title, canonical, method anchors, and other-language pages remain intact. Only this substantively changed guide receives a new sitemap `lastmod`.
+
+### Analytics verification
+
+- `node --test tests/website-analytics.test.mjs` covers download classifications, exclusions, all three button placements, latest-release updates, and offline/rate-limit fallbacks.
+- Browser checks on the actual site code passed at widths 1280, 768, 390, and 320; installer API failure and JavaScript-disabled fallback also passed.
+- An isolated production-host browser test intercepted **all** external requests. It verified no tracking before consent or after decline, one explicit page view after consent, three correctly attributed installer-click events, query/hash removal, and withdrawal behavior. It sent **no** GA4 events or installer downloads. This is client behavior verification, not proof of new event ingestion into the live account.
+- After the user's explicit approval, five **event-scoped** custom dimensions were saved in the **Pyrus Website** property on 2026-11-02: 按钮位置 → `button_location`, 目标平台 → `target_platform`, 下载类型 → `download_kind`, 安装包格式 → `artifact_format`, 页面语言 → `page_language`. The account list displayed all five saved mappings. This registers existing parameters, not new data collection. Allow 24–48 hours for newly processed dimension data; historical dimension values are not backfilled. No key-event, consent, advertising, access, or retention setting was changed.
+
+### Remaining sitemap action
+
+The exact cause remains unconfirmed. Preserve the successful live-test result and the failing sitemap report. Since Google's documentation says failed sitemap retries eventually stop, one deliberate resubmission of this **same tested URL** can be considered after deployment; do not repeatedly resubmit or rename it. The success criterion is still **Success** with discovered URLs, not a submission-accepted notification. For this small internally linked site, this report alone is not evidence that all pages are blocked from search.
+
 ## Follow-up — 2026-10-29
 
 - Public sitemap GET still returns **HTTP 200**, `application/xml`; the deployed XML remains well-formed. The host-root robots.txt still returns 404. These public checks do **not** confirm that Search Console's sitemap report has recovered.
