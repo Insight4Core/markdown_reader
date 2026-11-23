@@ -125,12 +125,15 @@ body.md-reader {
         padding: 30px 70px 40px;
         margin: auto;
         color: var(--color-text-primary);
-        transition: max-width 0.1s;
+        transition: max-width 0.15s ease;
         animation: article-enter .28s cubic-bezier(.2,.8,.2,1);
         &.centered {
-          max-width: 900px;
+          max-width: var(--reader-max-width, clamp(680px, 74cqi, 100cqi));
         }
         .theme(); // markdown theme
+        // Override @md-reader/theme's fixed font-size (16px) and line-height (1.5) AFTER .theme().
+        font-size: var(--reader-font-size, 16px);
+        line-height: var(--reader-line-height, 1.65);
         > :first-child { margin-top: 0; }
         a {
           color: var(--color-primary);
@@ -173,25 +176,66 @@ body.md-reader {
         }
         
         h1 {
-          font-size: 2.2em;
+          font-size: 2.1em;
           padding-bottom: 0.42em;
           border-bottom: 1px solid var(--color-border);
         }
         
         h2 {
-          font-size: 1.7em;
+          font-size: 1.65em;
           padding-bottom: 0.42em;
           border-bottom: 1px solid var(--color-border);
         }
-        
-        p {
+
+        h3 { font-size: 1.35em; }
+        h4 { font-size: 1.15em; }
+        h5 { font-size: 1.02em; }
+        h6 { font-size: 0.95em; }
+
+        p,
+        li,
+        blockquote,
+        dd,
+        dt,
+        td,
+        th {
+          font-size: inherit;
           line-height: inherit;
+        }
+
+        figure figcaption {
+          font-size: 0.9em;
+          line-height: inherit;
+        }
+
+        p {
           margin-bottom: 1.2em;
           // Plain wrapping on purpose: WebKit's `text-wrap: pretty` breaks lines early to even
           // out a paragraph, which leaves ragged gaps on the right in Chinese text.
         }
 
-        img { border-radius: 10px; box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 9%, transparent); }
+        img {
+          border-radius: 10px;
+          box-shadow: 0 12px 28px color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+          cursor: zoom-in;
+        }
+
+        a img {
+          cursor: pointer;
+        }
+
+        mark.in-page-find {
+          padding: 0 1px;
+          border-radius: 3px;
+          color: inherit;
+          background: color-mix(in srgb, var(--color-mark) 65%, transparent);
+        }
+
+        mark.in-page-find--active {
+          color: #1c231f;
+          background: var(--color-warning);
+          box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 45%, transparent);
+        }
 
         hr { height: 1px; margin: 2.4em 0; border: 0; background: var(--color-border); }
 
@@ -207,20 +251,26 @@ body.md-reader {
           }
         }
         
+        code {
+          font-size: 0.88em;
+        }
+
         code:not([class*="language-"]) {
           font-family: var(--font-family-code, monospace);
           background: var(--color-code-bg);
           color: var(--color-danger);
           padding: 0.2em 0.4em;
           border-radius: 4px;
-          font-size: 85%;
+          font-size: 0.88em;
         }
 
         // code-block copy button
         pre.md-reader__code-block {
           position: relative;
+          line-height: inherit;
           code {
             font-family: var(--font-family-code, monospace);
+            font-size: 0.88em;
             &:empty + .md-reader__btn--copy {
               display: none;
             }
@@ -407,42 +457,53 @@ body.md-reader {
     &--copy {
       opacity: 0;
       position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      border: 1px solid var(--color-border);
-      display: flex;
+      top: 10px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 85%, transparent);
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: opacity 0.2s, background 0.1s, color 0.1s, border-color 0.2s;
+      transition: opacity 0.18s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
       z-index: 1;
-      background: var(--color-button_copy-bg);
-      color: var(--color-button_copy);
+      background: color-mix(in srgb, var(--color-bg) 86%, transparent);
+      color: var(--color-text-secondary);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 2px 8px color-mix(in srgb, var(--color-text-primary) 7%, transparent);
       cursor: pointer;
       &:hover {
-        background: var(--color-button_copy-bg-hover);
-        color: var(--color-button_copy-hover);
+        background: var(--color-bg);
+        border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+        color: var(--color-primary);
       }
       &:active {
-        background: var(--color-button_copy-bg-active);
-        color: var(--color-button_copy-active);
-        transform: scale(0.95);
+        transform: scale(0.94);
       }
       svg {
-        display: none !important;
+        width: 15px;
+        height: 15px;
+        fill: none;
+        stroke: currentColor;
+        filter: none;
       }
-      &::after {
-        content: '📋';
-        font-size: 16px;
-        line-height: 1;
+      .icon-success {
+        display: none;
       }
       &.copied {
-        border-color: var(--color-success);
-        &::after {
-          content: '✅';
-          animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        opacity: 1;
+        border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+        background: color-mix(in srgb, var(--color-success-alpha-10) 85%, var(--color-bg));
+        color: var(--color-success);
+        .icon-copy {
+          display: none;
+        }
+        .icon-success {
+          display: block;
+          animation: popIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
         }
       }
     }
@@ -597,6 +658,10 @@ body.md-reader {
     margin: 1.2em 0;
     text-align: center;
 
+    &:not(.mermaid-diagram--failed):not(.mermaid-diagram--pending) {
+      cursor: zoom-in;
+    }
+
     svg {
       max-width: 100%;
       height: auto;
@@ -671,6 +736,7 @@ body.md-reader {
   .reading-progress,
   .single-reading-guide,
   .knowledge-echo,
+  .find-bar,
   .floating-gear,
   .app-toast,
   .file-drop-overlay,
@@ -701,10 +767,20 @@ body.md-reader {
   .md-reader__markdown-content.centered {
     width: auto !important;
     max-width: none !important;
+    font-size: 15px !important;
+    line-height: 1.65 !important;
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
     animation: none !important;
+
+    mark.in-page-find,
+    mark.in-page-find--active {
+      padding: 0 !important;
+      color: inherit !important;
+      background: transparent !important;
+      box-shadow: none !important;
+    }
 
     // Code and quotes continue on the next page like running text. Keeping a long code
     // block whole pushes it to the next page and leaves most of the current one empty.

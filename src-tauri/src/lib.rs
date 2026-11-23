@@ -6,6 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
+use tauri_plugin_opener::OpenerExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -665,6 +666,162 @@ const PRINT_MARGIN_TOP_BOTTOM_MM: f64 = 16.0;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PRINT_MARGIN_LEFT_RIGHT_MM: f64 = 15.0;
 
+/// Validate that an external handoff target exists, is a regular file, and is a Markdown document.
+fn validate_markdown_file_path(raw: &str) -> Result<PathBuf, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("Empty file path".to_string());
+    }
+    let path = PathBuf::from(trimmed);
+    if !path.is_file() {
+        return Err("File does not exist".to_string());
+    }
+    let is_markdown = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx"));
+    if !is_markdown {
+        return Err("Only Markdown files can be opened externally".to_string());
+    }
+    Ok(path)
+}
+
+fn normalize_editor_arg(editor: Option<String>) -> Option<String> {
+    editor
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_editor_app_alias(editor: &str) -> Option<&'static str> {
+    match editor.trim().to_ascii_lowercase().as_str() {
+        "code" => Some("Visual Studio Code"),
+        "code-insiders" => Some("Visual Studio Code - Insiders"),
+        "cursor" => Some("Cursor"),
+        "zed" => Some("Zed"),
+        "subl" | "sublime" => Some("Sublime Text"),
+        "typora" => Some("Typora"),
+        "obsidian" => Some("Obsidian"),
+        "nova" => Some("Nova"),
+        "bbedit" => Some("BBEdit"),
+        "antigravity" | "agy" => Some("Antigravity"),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_macos_cli(editor: &str) -> Option<PathBuf> {
+    let candidate = Path::new(editor);
+    if editor.contains('/') {
+        return (candidate.is_file() && !editor.ends_with(".app")).then(|| candidate.to_path_buf());
+    }
+    let mut search_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default();
+    search_dirs.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/Applications/Visual Studio Code.app/Contents/Resources/app/bin"),
+        PathBuf::from("/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin"),
+        PathBuf::from("/Applications/Cursor.app/Contents/Resources/app/bin"),
+        PathBuf::from("/Applications/Sublime Text.app/Contents/SharedSupport/bin"),
+    ]);
+    if let Ok(home) = std::env::var("HOME") {
+        search_dirs.push(PathBuf::from(home).join(".local/bin"));
+    }
+    search_dirs
+        .into_iter()
+        .map(|dir| dir.join(editor))
+        .find(|path| path.is_file())
+}
+
+fn launch_with_custom_editor(target: &Path, editor: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(binary) = resolve_macos_cli(editor) {
+            std::process::Command::new(binary)
+                .arg(target)
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        let app_name = macos_editor_app_alias(editor).unwrap_or(editor);
+        let output = std::process::Command::new("open")
+            .arg("-a")
+            .arg(app_name)
+            .arg(target)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("Unable to open with '{editor}'")
+        } else {
+            stderr
+        });
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if std::process::Command::new(editor).arg(target).spawn().is_ok() {
+            return Ok(());
+        }
+        // Fallback for `.cmd`/`.bat` shims like `code.cmd` or `cursor.cmd` on PATH.
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "where", editor])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if status {
+            std::process::Command::new("cmd")
+                .arg("/C")
+                .arg(editor)
+                .arg(target)
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        return Err(format!("Unable to find editor '{editor}'"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new(editor)
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
+fn open_file_externally(
+    app: tauri::AppHandle,
+    path: String,
+    editor: Option<String>,
+) -> Result<(), String> {
+    let target = validate_markdown_file_path(&path)?;
+    match normalize_editor_arg(editor) {
+        None => app
+            .opener()
+            .open_path(target.to_string_lossy().as_ref(), None::<&str>)
+            .map_err(|error| error.to_string()),
+        Some(ed) => launch_with_custom_editor(&target, &ed),
+    }
+}
+
+#[tauri::command]
+fn reveal_file_in_manager(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let target = validate_markdown_file_path(&path)?;
+    app.opener()
+        .reveal_item_in_dir(target)
+        .map_err(|error| error.to_string())
+}
+
 /// Open the system print dialog for the note being read ("Save as PDF" lives there).
 #[tauri::command]
 fn print_document(webview: tauri::Webview) -> Result<(), String> {
@@ -842,6 +999,8 @@ pub fn run() {
             search_content,
             find_knowledge_echoes,
             recent_markdown_changes,
+            open_file_externally,
+            reveal_file_in_manager,
             print_document
         ])
         .build(tauri::generate_context!())
@@ -1012,5 +1171,41 @@ mod tests {
 
         assert_eq!(echoes.len(), 1);
         assert_ne!(echoes[0].file_name, "current.md");
+    }
+
+    #[test]
+    fn external_handoff_validates_existing_markdown_files_only() {
+        let root = std::env::temp_dir().join(format!(
+            "pyrus-external-handoff-{}-{}",
+            std::process::id(),
+            unix_millis(SystemTime::now()).unwrap()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let md_path = root.join("Note.MD");
+        let mdx_path = root.join("doc.mdx");
+        let script_path = root.join("run.sh");
+        fs::write(&md_path, "# hi").unwrap();
+        fs::write(&mdx_path, "# hi").unwrap();
+        fs::write(&script_path, "echo hi").unwrap();
+
+        assert!(validate_markdown_file_path(md_path.to_str().unwrap()).is_ok());
+        assert!(validate_markdown_file_path(mdx_path.to_str().unwrap()).is_ok());
+        assert!(validate_markdown_file_path(script_path.to_str().unwrap()).is_err());
+        assert!(validate_markdown_file_path(root.to_str().unwrap()).is_err());
+        assert!(validate_markdown_file_path(root.join("missing.md").to_str().unwrap()).is_err());
+        assert!(validate_markdown_file_path("   ").is_err());
+
+        assert_eq!(normalize_editor_arg(None), None);
+        assert_eq!(normalize_editor_arg(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_editor_arg(Some("  code  ".to_string())),
+            Some("code".to_string())
+        );
+        assert_eq!(macos_editor_app_alias("code"), Some("Visual Studio Code"));
+        assert_eq!(macos_editor_app_alias("CURSOR"), Some("Cursor"));
+        assert_eq!(macos_editor_app_alias("Typora"), Some("Typora"));
+        assert_eq!(macos_editor_app_alias("nonexistent-editor"), None);
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

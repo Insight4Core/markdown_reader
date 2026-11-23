@@ -33,6 +33,10 @@ export async function articleHtmlForClipboard(article: Element): Promise<string>
     if (box) svgSizes.set(svg, { width: Math.round(box.width), height: Math.round(box.height) });
   });
   clone.querySelectorAll(APP_CHROME).forEach(element => element.remove());
+  // Never carry temporary in-page find highlights into pasted rich text.
+  clone.querySelectorAll('mark.in-page-find, mark.search-highlight').forEach(mark => {
+    mark.replaceWith(document.createTextNode(mark.textContent || ''));
+  });
   // Pasted documents are white: keep the light drawing of each diagram, drop the dark-theme one.
   clone.querySelectorAll('.mermaid-diagram__screen').forEach(element => element.remove());
 

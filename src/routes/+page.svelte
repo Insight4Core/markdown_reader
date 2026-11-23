@@ -21,6 +21,13 @@
   import { cubicOut } from 'svelte/easing';
   import { parseReadingLink, fragmentCandidates } from '$lib/reading-links';
   import { readingPercent, unfinishedDocuments, groupSearchHits, highlightParts, documentContext, changeStatus, documentLocation } from '$lib/reading-presentation';
+  import { applyInPageHighlights, clearInPageHighlights, nextMatchIndex, sanitizeFindSeed, setActiveHighlight } from '$lib/in-page-find';
+  import { DEFAULT_TYPOGRAPHY, FONT_SIZE_MIN, FONT_SIZE_MAX, WIDTH_PRESETS, LINE_HEIGHT_PRESETS, normalizeTypography, isDefaultTypography, typographyCssVars, type ReadingTypography } from '$lib/reading-typography';
+  import { shouldOpenImageLightbox, scopeSvgIds } from '$lib/media-lightbox';
+  import { recordRecentWorkspace, removeRecentWorkspace, restoreRecentWorkspaces } from '$lib/recent-workspaces';
+  import FindBar from '$lib/components/FindBar.svelte';
+  import MediaLightbox, { type LightboxItem } from '$lib/components/MediaLightbox.svelte';
+  import WorkspaceSwitcher from '$lib/components/WorkspaceSwitcher.svelte';
   import '@/style/index.less';
 
   onMount(() => {
@@ -102,25 +109,45 @@
         event.preventDefault();
         void activateTab(cycleTab({ tabs: displayTabs, activeId: activeTabId }, event.shiftKey ? -1 : 1));
       }
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'f' && filePath) {
+        if (!globalSearchOpen && !newWorkspaceOpen && !lightboxItem) {
+          event.preventDefault();
+          openFindBar();
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p' && filePath) {
         // Print the note, not the app window.
         event.preventDefault();
         void exportPdf();
       }
-      if (event.key === 'Escape' && exportMenuOpen) exportMenuOpen = false;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         openGlobalSearch();
       }
-      if (event.key === 'Escape' && globalSearchOpen) closeGlobalSearch();
-      else if (event.key === 'Escape' && drawerOpen) drawerOpen = false;
-      else if (event.key === 'Escape' && compactEchoMode && knowledgeEchoExpanded) closeEchoPeek();
+      if (event.key === 'Escape') {
+        if (lightboxItem || globalSearchOpen || (compactEchoMode && knowledgeEchoExpanded)) {
+          // Handled by the active top-layer <dialog> cancel event.
+        } else if (newWorkspaceOpen && !isCreatingWorkspace) {
+          newWorkspaceOpen = false;
+        } else if (drawerOpen) {
+          drawerOpen = false;
+        } else if (exportMenuOpen || externalMenuOpen || workspaceSwitcherOpen) {
+          exportMenuOpen = false;
+          externalMenuOpen = false;
+          workspaceSwitcherOpen = false;
+        } else if (findBarOpen) {
+          closeFindBar();
+        }
+      }
     };
     window.addEventListener('keydown', handleGlobalShortcut);
-    const closeExportMenu = (event: MouseEvent) => {
-      if (exportMenuOpen && !(event.target as Element | null)?.closest?.('.export-menu')) exportMenuOpen = false;
+    const closeMenusOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (exportMenuOpen && !target?.closest?.('.export-menu')) exportMenuOpen = false;
+      if (externalMenuOpen && !target?.closest?.('.external-menu')) externalMenuOpen = false;
+      if (workspaceSwitcherOpen && !target?.closest?.('.workspace-switcher')) workspaceSwitcherOpen = false;
     };
-    window.addEventListener('click', closeExportMenu);
+    window.addEventListener('click', closeMenusOnOutsideClick);
     requestAnimationFrame(() => {
       const readingBody = document.querySelector('.md-reader__body');
       if (!readingBody || typeof ResizeObserver === 'undefined') return;
@@ -137,7 +164,8 @@
       window.removeEventListener('scroll', saveReadingProgress);
       document.removeEventListener('click', handleMarkdownClick, true);
       window.removeEventListener('keydown', handleGlobalShortcut);
-      window.removeEventListener('click', closeExportMenu);
+      window.removeEventListener('click', closeMenusOnOutsideClick);
+      if (findTimer) clearTimeout(findTimer);
       window.clearInterval(dayRefreshTimer);
       window.clearInterval(recentChangesTimer);
       window.removeEventListener('focus', refreshRecentChanges);
@@ -163,6 +191,7 @@
   let tabSequence = 0;
   let displayTabs = $derived(tabs.map(tab => tab.id === activeTabId ? { ...tab, history: readingHistory, index: readingHistoryIndex } : tab));
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
+  const isWindows = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || navigator.userAgent);
   let navigating = $state(false);
   let navigationRequest = 0;
   
@@ -172,6 +201,23 @@
   let showSidebar = $state(true);
   let currentTheme = $state('light');
   let appFont = $state('auto');
+  let readingTypography = $state<ReadingTypography>({ ...DEFAULT_TYPOGRAPHY });
+  let typographyVars = $derived(typographyCssVars(readingTypography));
+  let typographyIsDefault = $derived(isDefaultTypography(readingTypography));
+  let externalEditor = $state('');
+  let externalMenuOpen = $state(false);
+  let recentWorkspaces = $state<string[]>([]);
+  let workspaceSwitcherOpen = $state(false);
+  let findBarOpen = $state(false);
+  let findQuery = $state('');
+  let findMarks: HTMLElement[] = [];
+  let findMatchCount = $state(0);
+  let findActiveIndex = $state(-1);
+  let findBarRef = $state<{ focusInput: (selectAll?: boolean) => void } | undefined>(undefined);
+  let findTimer: ReturnType<typeof setTimeout> | null = null;
+  let findReturnFocus: HTMLElement | null = null;
+  let lightboxItem = $state<LightboxItem | null>(null);
+  let lightboxReturnFocus: HTMLElement | null = null;
   /** False while the language follows the system; true once the reader picks one in Settings. */
   let localeChosen = $state(false);
   let exportMenuOpen = $state(false);
@@ -455,6 +501,9 @@
     await store.set('appTheme', currentTheme);
     await store.set('appFont', appFont);
     await store.set('customFontInput', customFontInput);
+    await store.set('readingTypography', $state.snapshot(readingTypography));
+    await store.set('externalEditor', externalEditor);
+    await store.set('recentWorkspaces', $state.snapshot(recentWorkspaces));
     await store.set('recentFiles', recentFiles);
     await store.set('pinnedFiles', pinnedFiles);
     await store.set('readingProgress', readingProgress);
@@ -519,6 +568,14 @@
             customFontInput = typeof savedCustomFont === 'string' ? savedCustomFont : (savedCustomFont.value || '');
         }
 
+        const savedTypography = await store.get('readingTypography');
+        readingTypography = normalizeTypography(savedTypography);
+
+        const savedExternalEditor = await store.get('externalEditor');
+        if (typeof savedExternalEditor === 'string') {
+            externalEditor = savedExternalEditor;
+        }
+
         const savedDepth = await store.get<{value?: number} | number>('maxDepth');
         if (savedDepth) maxDepth = typeof savedDepth === 'number' ? savedDepth : (savedDepth.value || maxDepth);
 
@@ -571,6 +628,14 @@
         if (typeof savedTabsDiscovered === 'boolean') tabsDiscovered = savedTabsDiscovered;
         const savedTabs = await store.get('tabsByWorkspace');
         if (savedTabs && typeof savedTabs === 'object') tabsByWorkspace = savedTabs as typeof tabsByWorkspace;
+        const savedRecentWorkspaces = await store.get('recentWorkspaces');
+        const legacyWorkspaces = Object.keys(tabsByWorkspace).filter(Boolean);
+        recentWorkspaces = restoreRecentWorkspaces(
+          Array.isArray(savedRecentWorkspaces) && savedRecentWorkspaces.length > 0
+            ? savedRecentWorkspaces
+            : legacyWorkspaces,
+          folderPath
+        );
         const restoredTabs = restoreTabs(tabsByWorkspace[folderPath || '']);
         if (restoredTabs) {
           tabs = restoredTabs.tabs;
@@ -699,6 +764,10 @@
                resolve();
              }));
            }
+           if (findBarOpen) {
+             if (findQuery.trim()) runInPageFind(findQuery, true);
+             else clearFindState();
+           }
         }
       } catch (e: any) {
         if (requestedPath !== filePath) return;
@@ -811,6 +880,9 @@
   function resetWorkspaceReadingState() {
     saveReadingProgress();
     resetReadingHistory();
+    closeFindBar(false);
+    lightboxItem = null;
+    externalMenuOpen = false;
     readingError = null;
     standaloneFilePath = '';
     folderFiles = [];
@@ -824,9 +896,30 @@
     resetWorkspaceReadingState();
     recentChanges = [];
     folderPath = path;
+    recentWorkspaces = recordRecentWorkspace(recentWorkspaces, path);
     folderFiles = await scanWorkspaceSources();
     sidebarTab = 'files';
     await restoreWorkspaceTabs();
+    void syncStore();
+  }
+
+  async function switchWorkspace(path: string) {
+    workspaceSwitcherOpen = false;
+    try {
+      // readDir has full fs:allow-read-dir capability and verifies the directory is accessible.
+      await readDir(path);
+      await activateWorkspaceFolder(path);
+      if (!filePath && '__TAURI_INTERNALS__' in window) {
+        void getCurrentWindow().setTitle(workspaceName);
+      }
+    } catch (error) {
+      console.warn('Unable to switch workspace:', error);
+      showToast(t('workspace.missing_toast'));
+    }
+  }
+
+  function removeRecentWorkspaceEntry(path: string) {
+    recentWorkspaces = removeRecentWorkspace(recentWorkspaces, path);
     void syncStore();
   }
 
@@ -1053,6 +1146,135 @@
     } catch (error) {
       console.error('Print failed:', error);
       showToast(t('export.print_failed'));
+    }
+  }
+
+  function revealLabel() {
+    if (isMac) return t('external.reveal_mac');
+    if (isWindows) return t('external.reveal_win');
+    return t('external.reveal_linux');
+  }
+
+  async function openCurrentExternally() {
+    externalMenuOpen = false;
+    if (!filePath) return;
+    try {
+      await invoke('open_file_externally', {
+        path: filePath,
+        editor: externalEditor.trim() || null
+      });
+    } catch (error) {
+      console.error('Open externally failed:', error);
+      showToast(t('external.open_failed'));
+    }
+  }
+
+  async function revealCurrentInManager() {
+    externalMenuOpen = false;
+    if (!filePath) return;
+    try {
+      await invoke('reveal_file_in_manager', { path: filePath });
+    } catch (error) {
+      console.error('Reveal in file manager failed:', error);
+      showToast(t('external.reveal_failed'));
+    }
+  }
+
+  function updateTypography(patch: Partial<ReadingTypography>) {
+    readingTypography = normalizeTypography({ ...readingTypography, ...patch });
+    void syncStore();
+  }
+
+  function resetTypography() {
+    readingTypography = { ...DEFAULT_TYPOGRAPHY };
+    void syncStore();
+  }
+
+  function clearFindState() {
+    if (findTimer) {
+      clearTimeout(findTimer);
+      findTimer = null;
+    }
+    const article = document.querySelector('.md-reader__markdown-content');
+    clearInPageHighlights(article);
+    findMarks = [];
+    findMatchCount = 0;
+    findActiveIndex = -1;
+  }
+
+  function runInPageFind(query: string, preserveIndex = false) {
+    const article = document.querySelector('.md-reader__markdown-content');
+    const previousIndex = findActiveIndex;
+    findMarks = applyInPageHighlights(article, query);
+    findMatchCount = findMarks.length;
+    if (findMatchCount === 0) {
+      findActiveIndex = -1;
+      return;
+    }
+    const next = preserveIndex && previousIndex >= 0
+      ? Math.min(previousIndex, findMatchCount - 1)
+      : 0;
+    findActiveIndex = next;
+    setActiveHighlight(findMarks, next, reducedMotion);
+  }
+
+  function handleFindQueryChange(nextQuery: string) {
+    findQuery = nextQuery;
+    if (findTimer) clearTimeout(findTimer);
+    if (nextQuery.trim() === '') {
+      clearFindState();
+      return;
+    }
+    findTimer = setTimeout(() => {
+      findTimer = null;
+      runInPageFind(nextQuery, false);
+    }, 80);
+  }
+
+  function stepFindMatch(delta: 1 | -1) {
+    if (findMatchCount === 0) return;
+    const next = nextMatchIndex(findActiveIndex, findMatchCount, delta);
+    findActiveIndex = next;
+    setActiveHighlight(findMarks, next, reducedMotion);
+  }
+
+  function openFindBar() {
+    if (!filePath) return;
+    if (!findBarOpen) {
+      findReturnFocus = document.activeElement as HTMLElement | null;
+      const selection = typeof window !== 'undefined' ? window.getSelection()?.toString() || '' : '';
+      const seed = sanitizeFindSeed(selection);
+      if (seed) findQuery = seed;
+      findBarOpen = true;
+      if (findQuery.trim()) {
+        void tick().then(() => runInPageFind(findQuery, false));
+      }
+    }
+    void tick().then(() => findBarRef?.focusInput(true));
+  }
+
+  function closeFindBar(restoreFocus = true) {
+    if (!findBarOpen && findMarks.length === 0) return;
+    findBarOpen = false;
+    clearFindState();
+    const target = findReturnFocus;
+    findReturnFocus = null;
+    if (restoreFocus && target?.isConnected) {
+      void tick().then(() => target.focus({ preventScroll: true }));
+    }
+  }
+
+  function openLightbox(item: LightboxItem, trigger: HTMLElement | null) {
+    lightboxReturnFocus = trigger;
+    lightboxItem = item;
+  }
+
+  function closeLightbox() {
+    lightboxItem = null;
+    const target = lightboxReturnFocus;
+    lightboxReturnFocus = null;
+    if (target?.isConnected) {
+      void tick().then(() => target.focus({ preventScroll: true }));
     }
   }
 
@@ -1867,6 +2089,9 @@
       if (filePath) addReadingVisit('');
     }
     navigationRequest += 1;
+    closeFindBar(false);
+    lightboxItem = null;
+    externalMenuOpen = false;
     readingError = null;
     navigating = false;
     if (unwatch) { unwatch(); unwatch = null; }
@@ -1888,6 +2113,10 @@
     saveReadingProgress();
     resetReadingHistory();
     startFreshTabs();
+    closeFindBar(false);
+    lightboxItem = null;
+    externalMenuOpen = false;
+    workspaceSwitcherOpen = false;
     readingError = null;
     if (unwatch) {
       unwatch();
@@ -2005,6 +2234,35 @@
         console.error('Unable to open link:', error);
         showToast(t('reading.link_failed'));
       }
+      return;
+    }
+
+    // 3. Open images and rendered Mermaid diagrams in the lightbox (ignore linked images and failed diagrams).
+    if (e.type !== 'click') return;
+    const imgEl = target.closest('img');
+    if (imgEl && shouldOpenImageLightbox({ tagName: imgEl.tagName, hasLinkAncestor: Boolean(imgEl.closest('a')) })) {
+      const src = imgEl.currentSrc || imgEl.getAttribute('src') || '';
+      if (src) {
+        e.preventDefault();
+        openLightbox({ kind: 'image', src, alt: imgEl.alt || imgEl.title || '' }, imgEl);
+      }
+      return;
+    }
+
+    const mermaidSlot = target.closest<HTMLElement>('.mermaid-diagram:not(.mermaid-diagram--failed):not(.mermaid-diagram--pending)');
+    if (mermaidSlot) {
+      const svg = mermaidSlot.querySelector<SVGSVGElement>('.mermaid-diagram__screen svg, .mermaid-diagram__both svg');
+      if (svg) {
+        e.preventDefault();
+        const box = svg.getBoundingClientRect();
+        openLightbox({
+          kind: 'svg',
+          markup: scopeSvgIds(svg.outerHTML, 'lb-'),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+          label: svg.getAttribute('aria-label') || t('lightbox.diagram')
+        }, mermaidSlot);
+      }
     }
   }
 
@@ -2091,19 +2349,18 @@
 <div class="md-reader" style="--side-width: {sidebarWidth}px;">
   {#if folderPath || filePath}
   <div class="md-reader__side">
-    {#if folderPath}
-      <button class="workspace-nav" onclick={() => openWorkspaceHome()} aria-label={t('workspace.home')}>
-        <span class="workspace-nav__mark">✦</span>
-        <span><small>{t('misc.reader_title')}</small><strong>{workspaceName}</strong></span>
-        <span class="workspace-nav__arrow">↗</span>
-      </button>
-    {:else}
-      <button class="workspace-nav workspace-nav--app" onclick={openFolder} aria-label={t('workspace.open_folder')}>
-        <span class="workspace-nav__mark">✦</span>
-        <span><small>{t('misc.reader_title')}</small><strong>Reading space</strong></span>
-        <span class="workspace-nav__arrow">+</span>
-      </button>
-    {/if}
+    <WorkspaceSwitcher
+      {folderPath}
+      {workspaceName}
+      {recentWorkspaces}
+      bind:open={workspaceSwitcherOpen}
+      {reducedMotion}
+      onGoHome={() => openWorkspaceHome()}
+      onSelectWorkspace={switchWorkspace}
+      onRemoveWorkspace={removeRecentWorkspaceEntry}
+      onOpenFolder={openFolder}
+      onNewWorkspace={showNewWorkspace}
+    />
     <div class="sidebar-tabs" class:sidebar-tabs--toc={sidebarTab === 'toc'}>
       <button aria-pressed={sidebarTab === 'files'} class={sidebarTab === 'files' ? 'active' : ''} onclick={() => selectSidebarTab('files')}>{t('sidebar.files')}</button>
       <button aria-pressed={sidebarTab === 'toc'} class={sidebarTab === 'toc' ? 'active' : ''} onclick={() => selectSidebarTab('toc')}>{t('sidebar.toc')}</button>
@@ -2209,8 +2466,26 @@
       {/if}
       <button class="reading-toolbar__search" onclick={openGlobalSearch} disabled={!folderPath || isStandaloneFile} title={t('search.title')}>{t('search.title')} <kbd>⌘ / Ctrl K</kbd></button>
       {#if filePath && !readingError}
+        <div class="external-menu">
+          <button class="external-menu__trigger" aria-haspopup="menu" aria-expanded={externalMenuOpen} aria-controls="external-menu-list" title={t('external.open_editor')} onclick={() => { externalMenuOpen = !externalMenuOpen; if (externalMenuOpen) exportMenuOpen = false; }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M14 5h5v5m0-5L10 14"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/></svg>
+            <span>{t('external.menu')}</span>
+          </button>
+          {#if externalMenuOpen}
+            <div class="export-menu__list" id="external-menu-list" role="menu" transition:fly={{ y: -4, duration: reducedMotion ? 0 : 140 }}>
+              <button role="menuitem" onclick={openCurrentExternally}>
+                <strong>{t('external.open_editor')}</strong>
+                <small>{externalEditor.trim() ? `${t('external.open_custom_hint')}${externalEditor.trim()}` : t('external.open_default_hint')}</small>
+              </button>
+              <button role="menuitem" onclick={revealCurrentInManager}>
+                <strong>{revealLabel()}</strong>
+                <small>{t('external.reveal_hint')}</small>
+              </button>
+            </div>
+          {/if}
+        </div>
         <div class="export-menu">
-          <button class="export-menu__trigger" aria-haspopup="menu" aria-expanded={exportMenuOpen} aria-controls="export-menu-list" title={t('export.menu')} onclick={() => exportMenuOpen = !exportMenuOpen}>
+          <button class="export-menu__trigger" aria-haspopup="menu" aria-expanded={exportMenuOpen} aria-controls="export-menu-list" title={t('export.menu')} onclick={() => { exportMenuOpen = !exportMenuOpen; if (exportMenuOpen) externalMenuOpen = false; }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>
             <span>{t('export.menu')}</span>
           </button>
@@ -2411,11 +2686,18 @@
       </div>
     {:else}
       {#if isStandaloneFile}
-        <div class="reading-context reading-context--standalone"><span>⌁ {t('workspace.standalone')}</span><span>{sourceName(filePath)}</span>{#if folderPath}<button onclick={addCurrentFileToWorkspace}>＋ {t('workspace.add_current_file')}</button>{/if}</div>
+        <div class="reading-context reading-context--standalone" style:--reader-max-width={typographyVars['--reader-max-width']} style:--reader-shell-width={typographyVars['--reader-shell-width']}><span>⌁ {t('workspace.standalone')}</span><span>{sourceName(filePath)}</span>{#if folderPath}<button onclick={addCurrentFileToWorkspace}>＋ {t('workspace.add_current_file')}</button>{/if}</div>
       {:else if folderPath}
-        <div class:reading-context--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)} class="reading-context"><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
+        <div class:reading-context--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)} class="reading-context" style:--reader-max-width={typographyVars['--reader-max-width']} style:--reader-shell-width={typographyVars['--reader-shell-width']}><button class="reading-context__home" onclick={() => openWorkspaceHome()}>⌂ {workspaceName}</button><span>/</span><span>{filePath.replace(folderPath, '').replace(/^\//, '')}</span><button onclick={() => togglePin(filePath)} class:active={pinnedFiles.includes(filePath)}>{pinnedFiles.includes(filePath) ? '✦ ' + t('workspace.unpin') : '✧ ' + t('workspace.pin')}</button></div>
       {/if}
-      <div class:reading-shell--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)} class="reading-shell">
+      <div
+        class:reading-shell--with-echo={!compactEchoMode && knowledgeEchoExpanded && (knowledgeEchoLoading || knowledgeEchoes.length > 0)}
+        class="reading-shell"
+        style:--reader-font-size={typographyVars['--reader-font-size']}
+        style:--reader-max-width={typographyVars['--reader-max-width']}
+        style:--reader-shell-width={typographyVars['--reader-shell-width']}
+        style:--reader-line-height={typographyVars['--reader-line-height']}
+      >
         {#key filePath}
           {#if showSingleReadingGuide}
             <aside class="single-reading-guide" aria-label={t('first_reading.title')}>
@@ -2465,6 +2747,22 @@
 {#if filePath}
   <div class="reading-progress" style="--progress: {progressPercent(filePath)}%" aria-hidden="true"></div>
 {/if}
+
+<FindBar
+  bind:this={findBarRef}
+  open={findBarOpen && Boolean(filePath)}
+  bind:query={findQuery}
+  currentIndex={findActiveIndex}
+  matchCount={findMatchCount}
+  {reducedMotion}
+  hasTabs={displayTabs.length > 1}
+  onQueryChange={handleFindQueryChange}
+  onNext={() => stepFindMatch(1)}
+  onPrev={() => stepFindMatch(-1)}
+  onClose={() => closeFindBar(true)}
+/>
+
+<MediaLightbox item={lightboxItem} onClose={closeLightbox} />
 
 {#if toastMessage}
   <div class="app-toast" role="status"><span>✦</span>{toastMessage}</div>
@@ -2575,6 +2873,61 @@
        <input type="text" bind:value={customFontInput} onchange={syncStore} placeholder={t('font.custom_placeholder')} />
     </div>
     {/if}
+    <div class="typography-controls">
+      <div class="setting-row setting-row--top">
+        <label for="settings-font-size">{t('typography.font_size')}<small>{readingTypography.fontSize}px</small></label>
+        {#if !typographyIsDefault}
+          <button class="text-button" onclick={resetTypography}>{t('typography.reset')}</button>
+        {/if}
+      </div>
+      <input
+        id="settings-font-size"
+        class="setting-range"
+        type="range"
+        min={FONT_SIZE_MIN}
+        max={FONT_SIZE_MAX}
+        step="1"
+        value={readingTypography.fontSize}
+        oninput={(event) => updateTypography({ fontSize: Number((event.currentTarget as HTMLInputElement).value) })}
+      />
+      <div class="setting-segmented">
+        <span>{t('typography.width')}</span>
+        <div role="group" aria-label={t('typography.width')}>
+          {#each WIDTH_PRESETS as preset}
+            <button
+              type="button"
+              aria-pressed={readingTypography.width === preset}
+              class:active={readingTypography.width === preset}
+              onclick={() => updateTypography({ width: preset })}
+            >{t(`typography.width_${preset}`)}</button>
+          {/each}
+        </div>
+      </div>
+      <div class="setting-segmented">
+        <span>{t('typography.line_height')}</span>
+        <div role="group" aria-label={t('typography.line_height')}>
+          {#each LINE_HEIGHT_PRESETS as preset}
+            <button
+              type="button"
+              aria-pressed={readingTypography.lineHeight === preset}
+              class:active={readingTypography.lineHeight === preset}
+              onclick={() => updateTypography({ lineHeight: preset })}
+            >{t(`typography.line_${preset}`)}</button>
+          {/each}
+        </div>
+      </div>
+    </div>
+    <div class="setting-editor">
+      <label for="settings-external-editor">{t('external.editor_label')}</label>
+      <input
+        id="settings-external-editor"
+        type="text"
+        bind:value={externalEditor}
+        onchange={syncStore}
+        placeholder={t('external.editor_placeholder')}
+      />
+      <span class="setting-hint">{t('external.editor_hint')}</span>
+    </div>
     <label class="setting-switch"><span>{t('settings.toggle_sidebar')}</span><input type="checkbox" bind:checked={showSidebar} onchange={syncStore} /><i></i></label>
     <label class="setting-switch"><span>{t('echo.setting')}</span><input type="checkbox" bind:checked={knowledgeEchoEnabled} onchange={handleKnowledgeEchoToggle} /><i></i></label>
     {#if hiddenEchoCount > 0}
@@ -2613,15 +2966,15 @@
   .reading-toolbar .reading-toolbar__return { margin-left: 8px; min-width: 0; font-size: 12px; color: var(--color-primary); }
   .reading-toolbar .reading-toolbar__search { margin-left: auto; gap: 10px; font-size: 12px; }
   .reading-toolbar__search kbd { color: var(--color-text-gray); font-size: 10px; }
-  .export-menu { position: relative; margin-left: 4px; }
-  .reading-toolbar .export-menu__trigger { gap: 6px; font-size: 12px; }
+  .export-menu, .external-menu { position: relative; margin-left: 4px; }
+  .reading-toolbar .export-menu__trigger, .reading-toolbar .external-menu__trigger { gap: 6px; font-size: 12px; }
   .export-menu__list { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; display: grid; width: 268px; padding: 6px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-bg); box-shadow: 0 14px 36px color-mix(in srgb, var(--color-text-primary) 14%, transparent); }
   .reading-toolbar .export-menu__list button { display: grid; grid-template-columns: 1fr auto; justify-content: stretch; justify-items: start; gap: 2px 10px; padding: 9px 10px; border-radius: 8px; color: var(--color-text-primary); text-align: left; }
   .export-menu__list strong { font-size: 13px; font-weight: 600; }
   .export-menu__list small { grid-column: 1; color: var(--color-text-gray); font-size: 11px; line-height: 1.4; }
   .export-menu__list kbd { grid-column: 2; grid-row: 1; color: var(--color-text-gray); font-size: 10px; }
   .export-menu__divider { height: 1px; margin: 4px 6px; background: var(--color-border); }
-  @media (max-width: 700px) { .reading-toolbar .export-menu__trigger span { display: none; } }
+  @media (max-width: 700px) { .reading-toolbar .export-menu__trigger span, .reading-toolbar .external-menu__trigger span { display: none; } }
   .reading-toolbar .reading-toolbar__echo { gap: 7px; margin-left: 8px; color: var(--color-primary); font-size: 12px; }
   .reading-toolbar__echo small { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; background: var(--color-primary-alpha-10); font-size: 11px; font-variant-numeric: tabular-nums; }
   .command-result--selected { background: var(--color-primary-alpha-10) !important; box-shadow: inset 2px 0 var(--color-primary); }
@@ -2714,6 +3067,15 @@
   }
   .setting-input { margin-top: 6px; }
   .setting-input input { width: 100%; max-width: none !important; }
+  .typography-controls { display: grid; gap: 8px; margin: 8px 0 6px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
+  .setting-segmented { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; }
+  .setting-segmented > span { color: var(--color-text-secondary); font-size: 12px; }
+  .setting-segmented > div { display: inline-flex; padding: 3px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-bg); gap: 2px; }
+  .setting-segmented button { padding: 4px 9px; border: 0; border-radius: 6px; color: var(--color-text-gray); background: transparent; font: 500 11px var(--font-family-body); cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
+  .setting-segmented button.active { color: var(--color-primary); background: var(--color-primary-alpha-10); font-weight: 650; }
+  .setting-editor { display: grid; gap: 6px; margin: 6px 0 4px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); }
+  .setting-editor label { color: var(--color-text-secondary); font-size: 12px; }
+  .setting-editor input { width: 100%; max-width: none !important; }
   .setting-range { width: 100%; margin: 7px 0 2px; accent-color: var(--color-primary); cursor: pointer; }
   .setting-hint { color: var(--color-text-gray); font-size: 10px; line-height: 1.5; }
   .workspace-close-button { display: flex; align-items: center; justify-content: space-between; width: 100%; margin: 2px 0 6px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--color-text-secondary); background: transparent; cursor: pointer; font-size: 11px; text-align: left; transition: color .18s ease, background .18s ease; }
@@ -2814,14 +3176,6 @@
     border-radius: 12px;
     background: color-mix(in srgb, var(--color-bg) 60%, transparent);
   }
-  .workspace-nav { display: flex; align-items: center; width: calc(100% - 28px); gap: 9px; margin: 0 14px 14px; padding: 9px 8px; border: 0; border-radius: 12px; color: var(--color-text-primary); background: transparent; cursor: pointer; text-align: left; transition: background .18s ease; }
-  .workspace-nav:hover { background: var(--color-primary-alpha-10); }
-  .workspace-nav--app { margin-bottom: 20px; }
-  .workspace-nav__mark { display: grid; place-items: center; width: 27px; height: 27px; flex: none; border-radius: 9px; color: var(--color-primary); background: var(--color-primary-alpha-10); }
-  .workspace-nav span:nth-child(2) { display: grid; min-width: 0; gap: 1px; }
-  .workspace-nav small { color: var(--color-text-gray); font-size: 8px; font-weight: 700; letter-spacing: .12em; }
-  .workspace-nav strong { overflow: hidden; color: var(--color-text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-  .workspace-nav__arrow { margin-left: auto; color: var(--color-text-gray); font-size: 14px; }
   .sidebar-tabs button {
     flex: 1;
     background: transparent;
@@ -3023,7 +3377,7 @@
   .document-list__progress { display: block; width: 100%; height: 3px; margin-top: 2px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--color-primary) 12%, var(--color-border)); }
   .document-list__progress i { display: block; height: 100%; border-radius: inherit; background: var(--color-primary); transition: width .3s ease; }
   .workspace-change { margin-top: 22px; padding: 0; border: 0; color: var(--color-primary); background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; }
-  .reading-context { display: flex; align-items: center; gap: 7px; max-width: 900px; margin: 22px auto -10px; padding: 7px 10px; color: var(--color-text-gray); border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--color-bg) 48%, transparent); box-shadow: 0 6px 18px color-mix(in srgb, var(--color-text-primary) 3%, transparent); font-size: 11px; }
+  .reading-context { display: flex; align-items: center; gap: 7px; max-width: var(--reader-max-width, clamp(680px, 74cqi, 100cqi)); margin: 22px auto -10px; padding: 7px 10px; color: var(--color-text-gray); border: 1px solid color-mix(in srgb, var(--color-border) 75%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--color-bg) 48%, transparent); box-shadow: 0 6px 18px color-mix(in srgb, var(--color-text-primary) 3%, transparent); font-size: 11px; transition: max-width .15s ease; }
   .reading-context span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .reading-context button { padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--color-text-gray); background: transparent; cursor: pointer; font-size: 11px; white-space: nowrap; }
   .reading-context > button:last-child { margin-left: auto; }
@@ -3067,9 +3421,9 @@
   @keyframes echoEnter { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
   @keyframes echoShimmer { to { background-position: -220% 0; } }
   @container reading-area (min-width: 1100px) {
-    .reading-context--with-echo { max-width: 1160px; }
-    .reading-shell--with-echo { display: grid; grid-template-columns: minmax(0, 820px) 278px; align-items: start; width: min(1160px, calc(100% - 48px)); gap: 28px; margin: 0 auto; }
-    .reading-shell--with-echo > .md-reader__markdown-content { min-width: 0; max-width: 820px; margin: 0; padding-right: 36px; padding-left: 36px; }
+    .reading-context--with-echo { max-width: var(--reader-shell-width, clamp(960px, 82cqi, calc(100cqi - 48px))); }
+    .reading-shell--with-echo { display: grid; grid-template-columns: minmax(0, 1fr) 278px; align-items: start; width: var(--reader-shell-width, clamp(960px, 82cqi, calc(100cqi - 48px))); gap: 28px; margin: 0 auto; transition: width .15s ease; }
+    .reading-shell--with-echo > .md-reader__markdown-content { min-width: 0; max-width: none; margin: 0; padding-right: 36px; padding-left: 36px; }
     .reading-shell--with-echo .knowledge-echo { position: sticky; top: 76px; right: auto; bottom: auto; z-index: 4; width: 278px; max-height: calc(100vh - 100px); margin: 24px 0 70px; }
     .reading-shell--with-echo .knowledge-echo__body { max-height: calc(100vh - 164px); overflow-y: auto; }
   }
@@ -3093,10 +3447,6 @@
   .sidebar-tabs::before { position: absolute; z-index: -1; top: 4px; bottom: 4px; left: 4px; width: calc(50% - 4px); border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent); border-radius: 8px; background: var(--color-bg); box-shadow: 0 2px 5px color-mix(in srgb, var(--color-text-primary) 5%, transparent); content: ''; transition: transform .26s var(--motion-ease); }
   .sidebar-tabs--toc::before { transform: translateX(100%); }
   .sidebar-tabs button.active, .sidebar-tabs button:hover { background: transparent; }
-  .workspace-nav__mark { width: 33px; height: 33px; border-radius: 11px; }
-  .workspace-nav strong { font-size: 13px; }
-  .workspace-nav__arrow { transition: transform .2s var(--motion-ease); }
-  .workspace-nav:hover .workspace-nav__arrow { transform: translate(2px, -2px); }
   .pin-button:focus-visible, .file-item:focus-within .pin-button { opacity: 1; }
   .welcome__orb { filter: blur(80px); opacity: .22; }
   .welcome__mark { border-radius: 24px; transform: rotate(-5deg); }

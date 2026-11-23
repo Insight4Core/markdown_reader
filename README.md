@@ -1,59 +1,65 @@
 <div align="center">
   <img src="./src-tauri/icons/128x128.png" alt="Pyrus logo" width="96" />
   <h1>Pyrus</h1>
-  <p><strong>A calm, local-first reading space that brings forgotten Markdown notes back to you.</strong></p>
+  <p><strong>A calm, local-first Markdown reader for notes, technical docs, and AI-generated drafts.</strong></p>
   <p><strong>English</strong> · <a href="./README_zh-CN.md">简体中文</a></p>
   <p><a href="https://insight4core.github.io/markdown_reader/en/">Website</a> · <a href="https://github.com/Insight4Core/markdown_reader/releases/latest">Download</a></p>
-  <p><a href="./docs/RELEASE_NOTES_v0.10.0.md">What's new in 0.10.0</a></p>
+  <p><a href="./docs/RELEASE_NOTES_v0.10.0.md">Latest release notes (0.10.0)</a></p>
 </div>
 
-## Early Access
+## Why Pyrus
 
-Pyrus is free while it grows. It is built for people who already keep notes in Markdown and want a more focused place to read, rediscover, and find them—without accounts, cloud sync, or an editor getting in the way.
+Most Markdown apps want to be an all-in-one editor or cloud workspace. Pyrus stays **read-first and local-first**: open any `.md`, `.markdown`, or `.mdx` file—or a whole folder of notes and AI-generated documents—and read with care, without accounts, cloud sync, or an editor getting in your way.
 
-## Your notes return when they matter
+Everything stays on your device. Original files are never moved, copied, or modified.
 
-Writing a note is easy. Remembering that it exists months later is harder.
+## Highlights
 
-The knowledge home now opens with **Today's Echo**: one locally selected note, one meaningful passage, and a clear reason it returned. Read it, bring it back tomorrow, hide it, or mark it helpful with one click. Only if you want to, you can add one sentence about how it helped; that context stays on your device with the rest of your reading history.
+### Focused Reading Craft
+- **Open anything instantly**: Drop a single Markdown file onto the window, open it from Finder/Explorer, or open a folder as a local knowledge space.
+- **Reading tabs**: `⌘`-click (`Ctrl`-click on Windows/Linux) or middle-click any note to open it in a new tab. Each tab keeps its own scroll position and back/forward history, restored per knowledge base after restart.
+- **In-page find & global search**: Press `⌘F` / `Ctrl+F` to search and step through matches inside the current note, or `⌘K` / `Ctrl+K` to search titles and content across every linked folder.
+- **Responsive typography & 5 themes**: Switch between **Light, Dusk, Paper, Terminal, and Glass**, choose fonts, and fine-tune **font size (14–32px)**, **window-relative reading width**, and **line height**.
+- **Rich technical rendering & media lightbox**: Syntax-highlighted code blocks with one-click copy, KaTeX math formulas, callouts, and theme-aware Mermaid diagrams. Click any image or rendered Mermaid diagram to inspect it in a zoomable, pannable lightbox (with a white/black backdrop toggle for transparent PNGs).
+- **Seamless external editor handoff**: Jump straight to your preferred external editor (e.g. `code`, `cursor`, `Typora`, or the system default app) or reveal the file in Finder / Explorer. Pyrus watches the file and refreshes automatically when you save.
 
-While you read, **Knowledge Echoes** quietly finds an older note connected to the page in front of you. It shows the passage that made the connection, the shared ideas, and why the note has returned—perhaps because you pinned it or have not read it for months.
+### Local Workspaces, Recent Changes & Echoes
+- **Quick workspace switcher**: Switch between up to 8 recent local folders directly from the sidebar header, restoring each space's own tabs and linked sources.
+- **Link without copying**: Attach extra folders or standalone files from anywhere on disk as linked sources—originals stay right where they are.
+- **Recent changes**: See notes created or modified in the past 7 days marked as *New*, *Updated*, or *Read*. Files written in the background by AI tools appear automatically.
+- **Knowledge Echoes & Today's Echo**: Quiet, on-device resurfacing that connects what you are reading to related older notes and brings one worthwhile note back each day—calculated entirely locally.
 
-Open the note, move to the next echo, bring it back later, or mark it as unrelated. Pyrus remembers useful feedback and combines it with pins and reading history. The knowledge home still brings back unread and long-unvisited notes when you want a broader rediscovery moment.
-
-Every connection is calculated entirely on your device. Pyrus does not upload or inspect your knowledge base through an external service.
+### Clean Export & Sharing
+- **Export PDF / Print (`⌘P` / `Ctrl+P`)**: Always laid out cleanly on white paper, with long code blocks flowing across pages and captions kept with their tables and images.
+- **Copy as rich text or Markdown**: Copy formatted HTML (with inlined styles and rasterized diagrams for email/docs) or raw Markdown in one click.
 
 ## Preview
 
-| Rediscover forgotten notes | Find anything with `⌘K` |
+| Rediscover & workspace home | Find anything with `⌘K` |
 | --- | --- |
 | ![Pyrus Rediscover suggestions](./docs/screenshots/rediscover-en.png) | ![Pyrus global search](./docs/screenshots/global-search-en.png) |
 
-| Continue reading | Preferences |
+| Focused reading | Preferences |
 | --- | --- |
 | ![Pyrus reading screen](./docs/screenshots/reading-en.png) | ![Pyrus preferences](./docs/screenshots/preferences-en.png) |
 
-## What makes it useful
+## Keyboard Shortcuts
 
-- **Meet one note again today** — Today's Echo brings back one unread, pinned, or long-unvisited note with a meaningful passage instead of another recommendation feed.
-- **Remember why it helped** — Mark an echo as useful and optionally leave one sentence about what it helped you understand today.
-- **Meet knowledge in context** — Knowledge Echoes surfaces a related old note while you read, with a relevant excerpt and shared themes.
-- **Local knowledge spaces** — Open an existing folder or create a new knowledge base with a ready-to-read `Welcome.md`.
-- **Read one file, without setup** — Drop any `.md`, `.markdown`, or `.mdx` file onto Pyrus, or open it directly from the welcome screen. It opens in a focused single-note reading mode.
-- **Bring a standalone note into a knowledge base** — While reading a Markdown file from elsewhere on your drive, add it to the current knowledge base as a linked source. The original file stays where it is; Pyrus does not copy or move it.
-- **Link folders, never copy them** — Add folders from anywhere on your drive as linked sources for a knowledge base. Their original files stay put; Explorer, search, and Knowledge Echoes simply include them.
-- **Pick up where you stopped** — Pyrus saves your reading position for every document and surfaces it on the knowledge home.
-- **Pin what matters** — Keep essential notes one click away.
-- **Find knowledge instantly** — Press `⌘K` on macOS or `Ctrl+K` elsewhere to search file names and document content, then jump to the matching passage.
-- **Read long documents with context** — A live outline follows your position in the document, alongside a subtle reading-progress indicator.
-- **Private by default** — Notes, pins, recents, progress, echo feedback, and rediscovery preferences stay on your device.
+| Action | macOS | Windows / Linux |
+| --- | --- | --- |
+| Find in current note | `⌘F` | `Ctrl+F` |
+| Global search | `⌘K` | `Ctrl+K` |
+| New tab / Close tab | `⌘T` / `⌘W` | `Ctrl+T` / `Ctrl+W` |
+| Switch tabs | `⌘1–9` / `⇧⌘[` `⇧⌘]` | `Ctrl+1–9` / `Ctrl+Tab` |
+| Toggle sidebar | `⌘\` | `Ctrl+\` |
+| Back / Forward in reading history | `⌥←` / `⌥→` | `Alt+←` / `Alt+→` |
+| Export PDF / Print | `⌘P` | `Ctrl+P` |
 
-## Getting started
+## Getting Started
 
 1. Launch Pyrus.
-2. Select **Open Markdown file** (or drop a file onto the window) for a single note, or choose **New knowledge base** / **Open knowledge base** for a collection.
-3. While reading a standalone file, choose **Add to this knowledge base** to keep it in your collection without moving it. From a knowledge home, choose **Add linked folder** to include a whole folder from elsewhere on your drive.
-4. Return to the knowledge home to rediscover notes, use the Explorer and Outline to navigate, or press `⌘K` / `Ctrl+K` to search every linked source.
+2. Drop any `.md` / `.markdown` / `.mdx` file to read immediately, or choose **Open knowledge base** / **New knowledge base** to work with a folder.
+3. Use the sidebar switcher to jump between recent folders, `⌘F` / `⌘K` to locate passages, and the top toolbar to open in your external editor or export when done.
 
 ## Download
 
@@ -61,17 +67,24 @@ Download the latest macOS, Windows, or Linux build from [GitHub Releases](https:
 
 ## Feedback
 
-Pyrus is shaped by early readers. Use **Send feedback** in Preferences, or open a [GitHub issue](https://github.com/Insight4Core/markdown_reader/issues) to share an idea or report a problem.
+Use **Send feedback** in Preferences, or open a [GitHub issue](https://github.com/Insight4Core/markdown_reader/issues) to share an idea or report a bug.
 
 ## Development
 
-Requirements: Node.js, Rust, and the platform prerequisites for Tauri.
+Requirements: Node.js, Rust, and platform prerequisites for Tauri 2.
 
 ```bash
 git clone https://github.com/Insight4Core/markdown_reader.git
 cd markdown_reader
 npm install
 npm run tauri dev
+```
+
+Run tests:
+
+```bash
+node --test tests/*.test.mjs
+cd src-tauri && cargo test
 ```
 
 ## License

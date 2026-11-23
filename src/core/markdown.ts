@@ -16,10 +16,7 @@ import { markdownItMermaid } from '$lib/mermaid-diagrams'
 import mAlert from '@/plugins/alert'
 import mMultimdTable from 'markdown-it-multimd-table'
 import MD_PLUGINS from '@/config/md-plugins'
-import successIcon from '@/images/icon_success.svg'
-import copyIcon from '@/images/icon_copy.svg'
 import className from '@/config/class-name'
-import Ele, { svg } from './ele'
 import { escapeHtml } from 'markdown-it/lib/common/utils'
 
 type Plugins = { [p: string]: ((a: MdOptions) => any[]) | any[] }
@@ -47,17 +44,10 @@ export interface MdOptions {
 }
 
 function initRender({ config = {}, plugins = [...MD_PLUGINS] }: MdOptions) {
-  const copyButton = new Ele<HTMLElement>(
-    'button',
-    {
-      className: [className.MD_BUTTON, className.COPY_BTN],
-      title: 'Copy',
-    },
-    [
-      svg(copyIcon, { className: 'icon-copy' }),
-      svg(successIcon, { className: 'icon-success' }),
-    ],
-  )
+  const copyButtonHtml = `<button type="button" class="${className.MD_BUTTON} ${className.COPY_BTN}" title="Copy" aria-label="Copy code">`
+    + `<svg class="icon-copy" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2.5"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`
+    + `<svg class="icon-success" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>`
+    + `</button>`
 
   const md = new MarkdownIt({
     html: true,
@@ -70,14 +60,14 @@ function initRender({ config = {}, plugins = [...MD_PLUGINS] }: MdOptions) {
         try {
           return `<pre class="hljs-pre md-reader__code-block"><code class="hljs" lang="${language}">${
             hljs.highlight(str, { language, ignoreIllegals: true }).value
-          }</code>${copyButton.ele.outerHTML}</pre>`
+          }</code>${copyButtonHtml}</pre>`
         } catch (err) {
           console.error(err)
           return 'parse error'
         }
       }
       const code = escapeHtml(str)
-      return `<pre class="hljs-pre md-reader__code-block"><code class="hljs ${language}">${code}</code>${copyButton.ele.outerHTML}</pre>`
+      return `<pre class="hljs-pre md-reader__code-block"><code class="hljs ${language}">${code}</code>${copyButtonHtml}</pre>`
     },
     ...config,
   })
