@@ -5,6 +5,7 @@ import { refreshWindowsDownload } from '../docs/assets/release-downloads.js';
 
 const root = 'https://github.com/Insight4Core/markdown_reader';
 const asset = `${root}/releases/download/v0.10.0/Pyrus_0.10.0_x64-setup.exe`;
+const macAsset = `${root}/releases/download/v0.10.0/Pyrus_0.10.0_aarch64.dmg`;
 const anchor = (href, location) => ({ href, getAttribute: () => location, closest: () => null });
 
 test('Windows installer clicks retain their placement and artifact type', () => {
@@ -12,6 +13,15 @@ test('Windows installer clicks retain their placement and artifact type', () => 
     assert.deepEqual(downloadDetails(anchor(asset, placement), '/markdown_reader/en/open-md-file-windows/'), {
       target_platform: 'windows', button_location: placement,
       download_kind: 'installer', artifact_format: 'exe',
+    });
+  }
+});
+
+test('macOS installer clicks retain their placement and artifact type', () => {
+  for (const placement of ['guide_start', 'reader_section', 'article_cta']) {
+    assert.deepEqual(downloadDetails(anchor(macAsset, placement), '/markdown_reader/en/open-md-file-mac/'), {
+      target_platform: 'macos', button_location: placement,
+      download_kind: 'installer', artifact_format: 'dmg',
     });
   }
 });
@@ -30,18 +40,29 @@ test('examples, signatures, metadata, unrelated repositories and source links ar
 
 test('future releases update all installer links and visible metadata together', async () => {
   const links = [{ href: asset }, { href: asset }, { href: asset }];
+  const macLinks = [{ href: macAsset }, { href: macAsset }, { href: macAsset }];
   const version = { textContent: 'v0.10.0' };
   const name = { textContent: 'Pyrus_0.10.0_x64-setup.exe' };
+  const macName = { textContent: 'Pyrus_0.10.0_aarch64.dmg' };
   const selectors = { '[data-pyrus-windows-installer]': links,
-    '[data-pyrus-release-version]': [version], '[data-pyrus-installer-name]': [name] };
+    '[data-pyrus-macos-installer]': macLinks,
+    '[data-pyrus-release-version]': [version],
+    '[data-pyrus-installer-name]': [name],
+    '[data-pyrus-macos-installer-name]': [macName] };
   const doc = { querySelectorAll: selector => selectors[selector] };
   const next = asset.replaceAll('0.10.0', '1.0.0');
+  const nextMac = macAsset.replaceAll('0.10.0', '1.0.0');
   await refreshWindowsDownload(doc, async () => ({ ok: true, json: async () => ({
-    tag_name: 'v1.0.0', assets: [{ state: 'uploaded', name: 'Pyrus_1.0.0_x64-setup.exe', browser_download_url: next }],
+    tag_name: 'v1.0.0', assets: [
+      { state: 'uploaded', name: 'Pyrus_1.0.0_x64-setup.exe', browser_download_url: next },
+      { state: 'uploaded', name: 'Pyrus_1.0.0_aarch64.dmg', browser_download_url: nextMac },
+    ],
   }) }));
   assert.ok(links.every(link => link.href === next));
+  assert.ok(macLinks.every(link => link.href === nextMac));
   assert.equal(version.textContent, 'v1.0.0');
   assert.equal(name.textContent, 'Pyrus_1.0.0_x64-setup.exe');
+  assert.equal(macName.textContent, 'Pyrus_1.0.0_aarch64.dmg');
 });
 
 test('GitHub outages leave the static installer link usable', async () => {
