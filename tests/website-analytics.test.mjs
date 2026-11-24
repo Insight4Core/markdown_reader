@@ -4,8 +4,8 @@ import { downloadDetails } from '../docs/assets/analytics.js';
 import { refreshWindowsDownload } from '../docs/assets/release-downloads.js';
 
 const root = 'https://github.com/Insight4Core/markdown_reader';
-const asset = `${root}/releases/download/v0.10.0/Pyrus_0.10.0_x64-setup.exe`;
-const macAsset = `${root}/releases/download/v0.10.0/Pyrus_0.10.0_aarch64.dmg`;
+const asset = `${root}/releases/download/v0.11.0/Pyrus_0.11.0_x64-setup.exe`;
+const macAsset = `${root}/releases/download/v0.11.0/Pyrus_0.11.0_aarch64.dmg`;
 const anchor = (href, location) => ({ href, getAttribute: () => location, closest: () => null });
 
 test('Windows installer clicks retain their placement and artifact type', () => {
@@ -31,8 +31,8 @@ test('release-page navigation is not classified as an installer download', () =>
 });
 
 test('examples, signatures, metadata, unrelated repositories and source links are excluded', () => {
-  for (const url of [asset + '.sig', `${root}/releases/download/v0.10.0/latest.json`,
-    `${root}/releases/download/v0.10.0/reading-demo.md`, `${root}/issues`,
+  for (const url of [asset + '.sig', `${root}/releases/download/v0.11.0/latest.json`,
+    `${root}/releases/download/v0.11.0/reading-demo.md`, `${root}/issues`,
     asset.replace('Insight4Core', 'unrelated'), asset.replace('github.com', 'example.com')]) {
     assert.equal(downloadDetails(anchor(url), '/markdown_reader/en/'), null, url);
   }
@@ -41,17 +41,17 @@ test('examples, signatures, metadata, unrelated repositories and source links ar
 test('future releases update all installer links and visible metadata together', async () => {
   const links = [{ href: asset }, { href: asset }, { href: asset }];
   const macLinks = [{ href: macAsset }, { href: macAsset }, { href: macAsset }];
-  const version = { textContent: 'v0.10.0' };
-  const name = { textContent: 'Pyrus_0.10.0_x64-setup.exe' };
-  const macName = { textContent: 'Pyrus_0.10.0_aarch64.dmg' };
+  const version = { textContent: 'v0.11.0' };
+  const name = { textContent: 'Pyrus_0.11.0_x64-setup.exe' };
+  const macName = { textContent: 'Pyrus_0.11.0_aarch64.dmg' };
   const selectors = { '[data-pyrus-windows-installer]': links,
     '[data-pyrus-macos-installer]': macLinks,
     '[data-pyrus-release-version]': [version],
     '[data-pyrus-installer-name]': [name],
     '[data-pyrus-macos-installer-name]': [macName] };
   const doc = { querySelectorAll: selector => selectors[selector] };
-  const next = asset.replaceAll('0.10.0', '1.0.0');
-  const nextMac = macAsset.replaceAll('0.10.0', '1.0.0');
+  const next = asset.replaceAll('0.11.0', '1.0.0');
+  const nextMac = macAsset.replaceAll('0.11.0', '1.0.0');
   await refreshWindowsDownload(doc, async () => ({ ok: true, json: async () => ({
     tag_name: 'v1.0.0', assets: [
       { state: 'uploaded', name: 'Pyrus_1.0.0_x64-setup.exe', browser_download_url: next },
